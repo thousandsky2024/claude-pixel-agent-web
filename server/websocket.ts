@@ -1,6 +1,11 @@
 /**
  * WebSocket Handler - Real-time Claude Code monitoring
- * Monitors JSONL transcript files and broadcasts hero state updates
+ *
+ * Claude Code transcript structure:
+ *   ~/.claude/projects/<encoded-path>/<session-id>.jsonl
+ *
+ * Encoded path: /home/user/myproject → -home-user-myproject
+ * Each .jsonl file = one Claude Code session = one Hero
  */
 
 import { WebSocket, WebSocketServer } from "ws";
@@ -19,12 +24,13 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CLAUDE_DIR = path.join(os.homedir(), ".claude");
-const DATA_DIR = path.join(os.homedir(), ".claude-pixel-agent");
+const HOME_DIR = os.homedir();
+const CLAUDE_DIR = path.join(HOME_DIR, ".claude");
+const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_DIR, "projects");
+const DATA_DIR = path.join(HOME_DIR, ".claude-pixel-agent");
 const HEROES_PATH = path.join(DATA_DIR, "heroes.json");
 const POLL_INTERVAL_MS = 500;
 const IDLE_DELAY_MS = 8000;
-const WAITING_DELAY_MS = 3000;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -34,10 +40,11 @@ const fileWatchers = new Map<number, fs.FSWatcher>();
 const pollTimers = new Map<number, NodeJS.Timeout>();
 const idleTimers = new Map<number, NodeJS.Timeout>();
 const fileOffsets = new Map<number, number>();
-const fileToHeroId = new Map<string, number>(); // maps transcript file path → hero id
+const fileToHeroId = new Map<string, number>(); // transcript file path → hero id
+const projectDirWatchers = new Map<string, fs.FSWatcher>(); // project dir → watcher
 let nextHeroId = 1;
-let directoryWatcher: fs.FSWatcher | null = null;
-let directoryPollTimer: NodeJS.Timeout | null = null;
+let projectsRootWatcher: fs.FSWatcher | null = null;
+let rootPollTimer: NodeJS.Timeout | null = null;
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
 
@@ -60,36 +67,54 @@ function loadPersistedHeroes() {
       for (const h of saved) {
         heroes.set(h.id, h);
         if (h.id >= nextHeroId) nextHeroId = h.id + 1;
+        // Re-register file mapping
+        if (h.sessionFile) {
+          fileToHeroId.set(h.sessionFile, h.id);
+        }
       }
     }
   } catch {}
+}
+
+// ─── Path Helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Decode Claude Code's encoded project path back to real filesystem path
+ * Example: -home-user-myproject → /home/user/myproject
+ */
+function decodeProjectPath(encodedName: string): string {
+  // Claude encodes by replacing / with - and prepending -
+  // Reverse: strip leading -, replace - with /
+  return encodedName.replace(/^-/, "/").replace(/-/g, "/");
+}
+
+/**
+ * Extract a friendly project name from the decoded path
+ */
+function projectNameFromPath(realPath: string): string {
+  const parts = realPath.split("/").filter(Boolean);
+  return parts[parts.length - 1] || realPath;
 }
 
 // ─── Tool → Room/State Mapping ────────────────────────────────────────────────
 
 function toolNameToRoom(toolName: string): DungeonRoom {
   const lower = toolName.toLowerCase();
-  if (lower.includes("bash") || lower.includes("execute") || lower.includes("run")) {
-    return "boss_arena";
-  }
-  if (lower.includes("web") || lower.includes("search") || lower.includes("fetch")) {
-    return "boss_arena";
-  }
-  if (lower.includes("read") || lower.includes("view")) {
-    return "boss_arena";
-  }
-  if (lower.includes("write") || lower.includes("edit") || lower.includes("create")) {
-    return "boss_arena";
-  }
+  if (lower.includes("bash") || lower.includes("execute") || lower.includes("run")) return "boss_arena";
+  if (lower.includes("write") || lower.includes("edit") || lower.includes("create")) return "boss_arena";
+  if (lower.includes("web") || lower.includes("search") || lower.includes("fetch")) return "boss_arena";
+  if (lower.includes("read") || lower.includes("view")) return "boss_arena";
+  if (lower.includes("task") || lower.includes("agent")) return "boss_arena";
+  if (lower.includes("plan") || lower.includes("think")) return "shop";
   return "boss_arena";
 }
 
 function toolNameToState(toolName: string): HeroState {
   const lower = toolName.toLowerCase();
   if (lower.includes("bash") || lower.includes("execute")) return "fighting";
+  if (lower.includes("write") || lower.includes("edit")) return "fighting";
   if (lower.includes("web") || lower.includes("search")) return "casting";
   if (lower.includes("read") || lower.includes("view")) return "casting";
-  if (lower.includes("write") || lower.includes("edit")) return "fighting";
   if (lower.includes("task") || lower.includes("agent")) return "fighting";
   return "fighting";
 }
@@ -102,26 +127,25 @@ function formatToolStatus(toolName: string, input: Record<string, unknown>): str
   }
   if (lower.includes("read") || lower.includes("view")) {
     const file = (input.file_path || input.path || input.filename || "") as string;
-    return `📖 Reading: ${path.basename(file)}`;
+    return `📖 Reading: ${path.basename(String(file))}`;
   }
   if (lower.includes("write") || lower.includes("edit")) {
     const file = (input.file_path || input.path || "") as string;
-    return `✍️ Writing: ${path.basename(file)}`;
+    return `✍️ Writing: ${path.basename(String(file))}`;
   }
   if (lower.includes("web") || lower.includes("search")) {
     const q = (input.query || input.url || "") as string;
     return `🔍 Searching: ${String(q).slice(0, 40)}`;
   }
-  if (lower.includes("task")) {
-    return `⚡ Spawning Sub-Agent`;
-  }
+  if (lower.includes("task")) return `⚡ Spawning Sub-Agent`;
   return `🗡️ Using: ${toolName}`;
 }
 
 // ─── Hero Management ──────────────────────────────────────────────────────────
 
-function createHero(agentId: number, transcriptPath: string): Hero {
-  const name = `Agent-${String(agentId).padStart(3, "0")}`;
+function createHero(agentId: number, transcriptPath: string, projectRealPath: string): Hero {
+  const projectName = projectNameFromPath(projectRealPath);
+  const name = `${projectName.slice(0, 8)}-${String(agentId).padStart(3, "0")}`;
   const hero: Hero = {
     id: agentId,
     name,
@@ -140,8 +164,12 @@ function createHero(agentId: number, transcriptPath: string): Hero {
     maxHp: 100,
     mp: 100,
     maxMp: 100,
-    projectPath: path.dirname(transcriptPath),
+    projectPath: projectRealPath,
+    sessionFile: transcriptPath,
   };
+  // Add slight random offset so heroes don't stack
+  hero.position.x += (Math.random() - 0.5) * 40;
+  hero.position.y += (Math.random() - 0.5) * 30;
   heroes.set(agentId, hero);
   persistHeroes();
   return hero;
@@ -151,17 +179,17 @@ function updateHeroState(hero: Hero, state: HeroState, room: DungeonRoom) {
   hero.state = state;
   hero.room = room;
   hero.position = { ...ROOM_POSITIONS[room] };
-  // Add slight random offset so heroes don't stack
   hero.position.x += (Math.random() - 0.5) * 40;
   hero.position.y += (Math.random() - 0.5) * 30;
 }
 
-function setHeroIdle(heroId: number) {
+function setHeroResting(heroId: number) {
   const hero = heroes.get(heroId);
   if (!hero) return;
   clearIdleTimer(heroId);
   updateHeroState(hero, "resting", "rest_area");
   hero.isWaiting = true;
+  hero.activeTools = [];
   hero.hp = Math.min(hero.maxHp, hero.hp + 10);
   hero.mp = Math.min(hero.maxMp, hero.mp + 15);
   persistHeroes();
@@ -173,9 +201,9 @@ function clearIdleTimer(heroId: number) {
   if (t) { clearTimeout(t); idleTimers.delete(heroId); }
 }
 
-function scheduleIdle(heroId: number, delay: number) {
+function scheduleRest(heroId: number, delay: number) {
   clearIdleTimer(heroId);
-  const t = setTimeout(() => setHeroIdle(heroId), delay);
+  const t = setTimeout(() => setHeroResting(heroId), delay);
   idleTimers.set(heroId, t);
 }
 
@@ -194,6 +222,7 @@ function processLine(heroId: number, line: string) {
 
   const type = record.type as string;
 
+  // ── Tool use start (assistant message with tool_use blocks) ──────────────
   if (type === "assistant") {
     const message = record.message as { content?: unknown[] } | undefined;
     const blocks = message?.content || [];
@@ -202,101 +231,110 @@ function processLine(heroId: number, line: string) {
     );
 
     if (toolUseBlocks.length > 0) {
-      clearIdleTimer(heroId);
       hero.isWaiting = false;
+      clearIdleTimer(heroId);
 
       for (const block of toolUseBlocks) {
-        const toolName = (block.name as string) || "Unknown";
-        const toolInput = (block.input as Record<string, unknown>) || {};
-        const toolId = (block.id as string) || `t-${Date.now()}`;
-        const status = formatToolStatus(toolName, toolInput);
+        const toolName = (block.name as string) || "unknown";
+        const toolId = (block.id as string) || `tool-${Date.now()}`;
+        const input = (block.input as Record<string, unknown>) || {};
 
-        // Update tool counts for class detection
+        // Update tool counts
         const lower = toolName.toLowerCase();
         if (lower.includes("bash") || lower.includes("execute")) hero.toolCount.bash++;
-        else if (lower.includes("web") || lower.includes("search")) hero.toolCount.web++;
         else if (lower.includes("read") || lower.includes("view")) hero.toolCount.read++;
-        else if (lower.includes("write") || lower.includes("edit")) hero.toolCount.write++;
+        else if (lower.includes("write") || lower.includes("edit") || lower.includes("create")) hero.toolCount.write++;
+        else if (lower.includes("web") || lower.includes("search") || lower.includes("fetch")) hero.toolCount.web++;
 
-        // Update hero class
-        hero.heroClass = detectHeroClass(hero.toolCount);
-
-        // Add active tool
+        // Add to active tools
         const activeTool: ActiveTool = {
           id: toolId,
           name: toolName,
-          status,
+          status: formatToolStatus(toolName, input),
           startedAt: Date.now(),
         };
 
-        // Check if it's a sub-agent tool (Task tool)
-        const isSubAgent = lower.includes("task") || lower.includes("subagent");
-        if (isSubAgent) {
-          if (!hero.subAgentTools[toolId]) {
-            hero.subAgentTools[toolId] = [];
-          }
+        // Check if it's a sub-agent tool
+        const parentId = record.parent_tool_use_id as string | undefined;
+        if (parentId) {
+          if (!hero.subAgentTools[parentId]) hero.subAgentTools[parentId] = [];
+          hero.subAgentTools[parentId].push(activeTool);
         } else {
-          hero.activeTools = hero.activeTools.filter((t) => t.id !== toolId);
           hero.activeTools.push(activeTool);
         }
 
-        // Update state
-        const newState = toolNameToState(toolName);
-        const newRoom = toolNameToRoom(toolName);
-        updateHeroState(hero, newState, newRoom);
-
-        // Gain EXP
-        hero.exp += 5;
-        if (hero.exp >= hero.level * 100) {
-          hero.exp = 0;
-          hero.level++;
-          hero.maxHp += 10;
-          hero.maxMp += 5;
-          hero.hp = hero.maxHp;
-          hero.mp = hero.maxMp;
-          broadcast({ type: "hero-levelup", payload: { heroId, level: hero.level } });
+        // Update hero state based on primary tool
+        if (hero.activeTools.length === 1 || toolUseBlocks.indexOf(block) === 0) {
+          const room = toolNameToRoom(toolName);
+          const state = toolNameToState(toolName);
+          updateHeroState(hero, state, room);
         }
+      }
 
-        broadcast({ type: "hero-tool-start", payload: { heroId, tool: activeTool } });
+      // Update hero class based on tool usage
+      hero.heroClass = detectHeroClass(hero.toolCount);
+
+      // Gain EXP
+      hero.exp += toolUseBlocks.length * 5;
+      if (hero.exp >= hero.level * 100) {
+        hero.level++;
+        hero.exp = hero.exp % (hero.level * 100);
+        hero.maxHp += 10;
+        hero.maxMp += 5;
+        hero.hp = hero.maxHp;
+        hero.mp = hero.maxMp;
+        broadcast({ type: "hero-levelup", payload: { heroId, level: hero.level } });
       }
 
       persistHeroes();
       broadcast({ type: "hero-update", payload: hero });
-    } else {
-      // Text response - hero is thinking/planning
-      if (!hero.isWaiting) {
-        updateHeroState(hero, "shopping", "shop");
-        persistHeroes();
-        broadcast({ type: "hero-update", payload: hero });
-      }
     }
-  } else if (type === "user") {
+  }
+
+  // ── Tool result (tool_result blocks in user message) ─────────────────────
+  if (type === "user") {
     const message = record.message as { content?: unknown[] } | undefined;
-    const blocks = (message?.content || []) as Record<string, unknown>[];
-    const toolResults = blocks.filter((b) => b.type === "tool_result");
+    const blocks = message?.content || [];
+    const resultBlocks = (blocks as Record<string, unknown>[]).filter(
+      (b) => b.type === "tool_result"
+    );
 
-    for (const result of toolResults) {
-      const toolUseId = result.tool_use_id as string;
-      hero.activeTools = hero.activeTools.filter((t) => t.id !== toolUseId);
-      delete hero.subAgentTools[toolUseId];
-      broadcast({ type: "hero-tool-done", payload: { heroId, toolId: toolUseId } });
+    if (resultBlocks.length > 0) {
+      for (const block of resultBlocks) {
+        const toolUseId = block.tool_use_id as string;
+        // Remove from active tools
+        hero.activeTools = hero.activeTools.filter((t) => t.id !== toolUseId);
+        // Remove from sub-agent tools
+        for (const key of Object.keys(hero.subAgentTools)) {
+          hero.subAgentTools[key] = hero.subAgentTools[key].filter((t) => t.id !== toolUseId);
+          if (hero.subAgentTools[key].length === 0) delete hero.subAgentTools[key];
+        }
+      }
+
+      // If no more active tools, schedule rest
+      if (hero.activeTools.length === 0 && Object.keys(hero.subAgentTools).length === 0) {
+        scheduleRest(heroId, IDLE_DELAY_MS);
+      }
+
+      persistHeroes();
+      broadcast({ type: "hero-update", payload: hero });
     }
+  }
 
-    if (hero.activeTools.length === 0 && Object.keys(hero.subAgentTools).length === 0) {
-      scheduleIdle(heroId, WAITING_DELAY_MS);
-    }
-
+  // ── Turn end ──────────────────────────────────────────────────────────────
+  if (type === "result" || type === "turn_end") {
+    hero.activeTools = [];
+    hero.subAgentTools = {};
+    scheduleRest(heroId, 2000); // Rest sooner after turn ends
     persistHeroes();
     broadcast({ type: "hero-update", payload: hero });
-  } else if (type === "system") {
-    const subtype = record.subtype as string;
-    if (subtype === "turn_duration" || subtype === "turn_end") {
-      hero.activeTools = [];
-      hero.subAgentTools = {};
-      scheduleIdle(heroId, IDLE_DELAY_MS);
-      persistHeroes();
-      broadcast({ type: "hero-update", payload: hero });
-    }
+  }
+
+  // ── System / init ─────────────────────────────────────────────────────────
+  if (type === "system" && record.subtype === "init") {
+    // Hero just started a new session
+    updateHeroState(hero, "idle", "corridor");
+    broadcast({ type: "hero-update", payload: hero });
   }
 }
 
@@ -304,7 +342,6 @@ function readNewLines(heroId: number, filePath: string) {
   try {
     const stat = fs.statSync(filePath);
     const offset = fileOffsets.get(heroId) || 0;
-
     if (stat.size <= offset) return;
 
     const fd = fs.openSync(filePath, "r");
@@ -325,86 +362,114 @@ function readNewLines(heroId: number, filePath: string) {
 // ─── File Watching ────────────────────────────────────────────────────────────
 
 function startWatchingFile(heroId: number, filePath: string) {
-  // Stop existing watchers
   const existing = fileWatchers.get(heroId);
   if (existing) { try { existing.close(); } catch {} }
   const existingPoll = pollTimers.get(heroId);
-  if (existingPoll) { clearInterval(existingPoll); }
+  if (existingPoll) clearInterval(existingPoll);
 
   fileOffsets.set(heroId, 0);
 
+  // Read existing content first
+  readNewLines(heroId, filePath);
+
   // Primary: fs.watch
   try {
-    const watcher = fs.watch(filePath, () => {
-      readNewLines(heroId, filePath);
-    });
+    const watcher = fs.watch(filePath, () => readNewLines(heroId, filePath));
     fileWatchers.set(heroId, watcher);
   } catch {}
 
-  // Secondary: polling (macOS reliability)
-  const poll = setInterval(() => {
-    readNewLines(heroId, filePath);
-  }, POLL_INTERVAL_MS);
+  // Secondary: polling (macOS/Linux reliability)
+  const poll = setInterval(() => readNewLines(heroId, filePath), POLL_INTERVAL_MS);
   pollTimers.set(heroId, poll);
 }
 
-function stopWatchingFile(heroId: number) {
-  const watcher = fileWatchers.get(heroId);
-  if (watcher) { try { watcher.close(); } catch {} fileWatchers.delete(heroId); }
-  const poll = pollTimers.get(heroId);
-  if (poll) { clearInterval(poll); pollTimers.delete(heroId); }
-  clearIdleTimer(heroId);
-  fileOffsets.delete(heroId);
-}
+function handleNewTranscriptFile(filePath: string, projectRealPath: string) {
+  if (!filePath.endsWith(".jsonl")) return;
 
-function watchClaudeDirectory() {
-  if (!fs.existsSync(CLAUDE_DIR)) {
-    // Poll for directory creation
-    directoryPollTimer = setInterval(() => {
-      if (fs.existsSync(CLAUDE_DIR)) {
-        clearInterval(directoryPollTimer!);
-        directoryPollTimer = null;
-        watchClaudeDirectory();
-      }
-    }, 2000);
-    return;
-  }
-
-  // Watch for new JSONL files
-  try {
-    directoryWatcher = fs.watch(CLAUDE_DIR, (event, filename) => {
-      if (filename && filename.endsWith(".jsonl")) {
-        const fullPath = path.join(CLAUDE_DIR, filename);
-        handleNewTranscriptFile(fullPath);
-      }
-    });
-    console.log("[File Monitor] Watching:", CLAUDE_DIR);
-  } catch (e) {
-    console.error("[File Monitor] Failed to start watching:", e);
-  }
-
-  // Scan existing JSONL files
-  try {
-    const files = fs.readdirSync(CLAUDE_DIR).filter((f) => f.endsWith(".jsonl"));
-    for (const file of files) {
-      handleNewTranscriptFile(path.join(CLAUDE_DIR, file));
-    }
-  } catch {}
-}
-
-function handleNewTranscriptFile(filePath: string) {
-  // Each JSONL file = one hero (one Claude Code session)
-  let heroId: number | null = fileToHeroId.get(filePath) ?? null;
+  let heroId = fileToHeroId.get(filePath) ?? null;
 
   if (heroId === null) {
     heroId = nextHeroId++;
-    const hero = createHero(heroId, filePath);
+    const hero = createHero(heroId, filePath, projectRealPath);
     fileToHeroId.set(filePath, heroId);
     broadcast({ type: "hero-new", payload: hero });
-    console.log(`[File Monitor] New hero created: ${hero.name} for ${filePath}`);
+    console.log(`[File Monitor] New hero: ${hero.name} | project: ${projectRealPath}`);
   }
 
   startWatchingFile(heroId, filePath);
+}
+
+/**
+ * Watch a single project directory for new .jsonl session files
+ */
+function watchProjectDir(projectDirPath: string, encodedName: string) {
+  if (projectDirWatchers.has(projectDirPath)) return; // already watching
+
+  const realPath = decodeProjectPath(encodedName);
+
+  // Scan existing .jsonl files
+  try {
+    const files = fs.readdirSync(projectDirPath).filter((f) => f.endsWith(".jsonl"));
+    for (const file of files) {
+      handleNewTranscriptFile(path.join(projectDirPath, file), realPath);
+    }
+  } catch {}
+
+  // Watch for new session files
+  try {
+    const watcher = fs.watch(projectDirPath, (event, filename) => {
+      if (filename && filename.endsWith(".jsonl")) {
+        handleNewTranscriptFile(path.join(projectDirPath, filename), realPath);
+      }
+    });
+    projectDirWatchers.set(projectDirPath, watcher);
+  } catch {}
+}
+
+/**
+ * Watch ~/.claude/projects/ for new project directories
+ */
+function watchProjectsRoot() {
+  if (!fs.existsSync(CLAUDE_PROJECTS_DIR)) {
+    // Poll until ~/.claude/projects/ exists
+    rootPollTimer = setInterval(() => {
+      if (fs.existsSync(CLAUDE_PROJECTS_DIR)) {
+        clearInterval(rootPollTimer!);
+        rootPollTimer = null;
+        watchProjectsRoot();
+      }
+    }, 3000);
+    console.log(`[File Monitor] Waiting for ${CLAUDE_PROJECTS_DIR} to be created...`);
+    return;
+  }
+
+  console.log(`[File Monitor] Watching projects root: ${CLAUDE_PROJECTS_DIR}`);
+
+  // Scan existing project directories
+  try {
+    const entries = fs.readdirSync(CLAUDE_PROJECTS_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        watchProjectDir(path.join(CLAUDE_PROJECTS_DIR, entry.name), entry.name);
+      }
+    }
+  } catch {}
+
+  // Watch for new project directories
+  try {
+    projectsRootWatcher = fs.watch(CLAUDE_PROJECTS_DIR, (event, filename) => {
+      if (!filename) return;
+      const fullPath = path.join(CLAUDE_PROJECTS_DIR, filename);
+      try {
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          watchProjectDir(fullPath, filename);
+        }
+      } catch {}
+    });
+  } catch (e) {
+    console.error("[File Monitor] Failed to watch projects root:", e);
+  }
 }
 
 // ─── Broadcast ────────────────────────────────────────────────────────────────
@@ -419,6 +484,23 @@ function broadcast(message: { type: string; payload: unknown }) {
   });
 }
 
+// ─── Client Message Handling ──────────────────────────────────────────────────
+
+function handleClientMessage(msg: Record<string, unknown>) {
+  if (msg.type === "clear-heroes") {
+    heroes.clear();
+    fileToHeroId.clear();
+    nextHeroId = 1;
+    persistHeroes();
+    broadcast({ type: "heroes-batch", payload: [] });
+  }
+
+  if (msg.type === "demo-mode") {
+    // Demo heroes are created via tRPC, just broadcast current state
+    broadcast({ type: "heroes-batch", payload: [...heroes.values()] });
+  }
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export function initializeWebSocket(server: unknown) {
@@ -429,7 +511,7 @@ export function initializeWebSocket(server: unknown) {
   wss.on("connection", (ws) => {
     console.log("[WebSocket] Client connected");
 
-    // Send current state
+    // Send current hero state to new client
     ws.send(JSON.stringify({
       type: "heroes-batch",
       payload: [...heroes.values()],
@@ -446,133 +528,10 @@ export function initializeWebSocket(server: unknown) {
     ws.on("error", (e) => console.error("[WebSocket] Error:", e));
   });
 
-  watchClaudeDirectory();
+  // Start monitoring Claude Code projects
+  watchProjectsRoot();
 }
 
-function handleClientMessage(msg: { type: string; payload?: unknown }) {
-  if (msg.type === "demo-start") {
-    startDemo();
-  } else if (msg.type === "demo-stop") {
-    stopDemo();
-  } else if (msg.type === "clear-heroes") {
-    clearAllHeroes();
-  }
-}
-
-// ─── Demo Mode ────────────────────────────────────────────────────────────────
-
-let demoInterval: NodeJS.Timeout | null = null;
-let demoHeroIds: number[] = [];
-
-const DEMO_TOOLS = [
-  { name: "Bash", input: { command: "npm run build" } },
-  { name: "Read", input: { file_path: "src/components/App.tsx" } },
-  { name: "Write", input: { file_path: "src/utils/helpers.ts" } },
-  { name: "WebSearch", input: { query: "React hooks best practices" } },
-  { name: "Bash", input: { command: "git commit -m 'feat: add dungeon ui'" } },
-  { name: "Read", input: { file_path: "package.json" } },
-];
-
-function startDemo() {
-  stopDemo();
-  clearAllHeroes();
-
-  // Create 3 demo heroes
-  const classes: HeroClass[] = ["warrior", "mage", "cleric"];
-  const names = ["Agent-Alpha", "Agent-Beta", "Agent-Gamma"];
-  const rooms: DungeonRoom[] = ["boss_arena", "church", "rest_area"];
-  const states: HeroState[] = ["fighting", "casting", "resting"];
-
-  demoHeroIds = [];
-  for (let i = 0; i < 3; i++) {
-    const id = nextHeroId++;
-    const hero: Hero = {
-      id,
-      name: names[i],
-      heroClass: classes[i],
-      state: states[i],
-      position: { ...ROOM_POSITIONS[rooms[i]] },
-      room: rooms[i],
-      activeTools: [],
-      subAgentTools: {},
-      toolCount: { bash: 0, read: 0, write: 0, web: 0 },
-      isWaiting: i === 2,
-      skills: [["power_strike", "battle_cry"], ["arcane_boost", "mystic_sight"], ["divine_shield"]][i],
-      level: [5, 3, 2][i],
-      exp: [340, 120, 80][i],
-      hp: [85, 60, 100][i],
-      maxHp: [100, 70, 100][i],
-      mp: [40, 90, 100][i],
-      maxMp: [60, 100, 100][i],
-    };
-    heroes.set(id, hero);
-    demoHeroIds.push(id);
-    broadcast({ type: "hero-new", payload: hero });
-  }
-
-  persistHeroes();
-
-  // Animate demo heroes
-  let tick = 0;
-  demoInterval = setInterval(() => {
-    tick++;
-    const heroId = demoHeroIds[tick % demoHeroIds.length];
-    const hero = heroes.get(heroId);
-    if (!hero) return;
-
-    const tool = DEMO_TOOLS[tick % DEMO_TOOLS.length];
-    const status = formatToolStatus(tool.name, tool.input);
-    const state = toolNameToState(tool.name);
-    const room = toolNameToRoom(tool.name);
-
-    if (tick % 3 === 0) {
-      // Rest phase
-      updateHeroState(hero, "resting", "rest_area");
-      hero.activeTools = [];
-      hero.isWaiting = true;
-      hero.hp = Math.min(hero.maxHp, hero.hp + 5);
-      hero.mp = Math.min(hero.maxMp, hero.mp + 8);
-    } else if (tick % 3 === 1) {
-      // Shopping/planning phase
-      updateHeroState(hero, "shopping", "shop");
-      hero.isWaiting = false;
-    } else {
-      // Fighting phase
-      updateHeroState(hero, state, room);
-      hero.activeTools = [{ id: `demo-${tick}`, name: tool.name, status, startedAt: Date.now() }];
-      hero.isWaiting = false;
-      hero.mp = Math.max(0, hero.mp - 5);
-    }
-
-    hero.exp = Math.min(hero.level * 100 - 1, hero.exp + 10);
-    persistHeroes();
-    broadcast({ type: "hero-update", payload: hero });
-  }, 2500);
-}
-
-function stopDemo() {
-  if (demoInterval) { clearInterval(demoInterval); demoInterval = null; }
-  for (const id of demoHeroIds) { heroes.delete(id); }
-  demoHeroIds = [];
-  persistHeroes();
-  broadcast({ type: "heroes-batch", payload: [...heroes.values()] });
-}
-
-function clearAllHeroes() {
-  for (const id of [...heroes.keys()]) {
-    stopWatchingFile(id);
-    clearIdleTimer(id);
-  }
-  heroes.clear();
-  nextHeroId = 1;
-  persistHeroes();
-  broadcast({ type: "heroes-batch", payload: [] });
-}
-
-export function stopWebSocketMonitoring() {
-  if (demoInterval) { clearInterval(demoInterval); demoInterval = null; }
-  if (directoryWatcher) { try { directoryWatcher.close(); } catch {} directoryWatcher = null; }
-  if (directoryPollTimer) { clearInterval(directoryPollTimer); directoryPollTimer = null; }
-  for (const id of [...heroes.keys()]) stopWatchingFile(id);
-  if (wss) { wss.close(); wss = null; }
+export function getHeroes(): Hero[] {
+  return [...heroes.values()];
 }

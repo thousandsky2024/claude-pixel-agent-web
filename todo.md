@@ -58,3 +58,20 @@
 - [x] 添加 vitest 测试（9 tests passing）
 - [x] 性能优化（Canvas 60fps 游戏循环）
 - [x] 最终检查点保存
+
+## Phase 8: 真实 Claude Code 集成重构
+- [ ] 修复转录监听路径：改为 ~/.claude/projects/**/*.jsonl（按项目组织）
+- [ ] 从文件路径解析项目名称（-home-user-myproject → /home/user/myproject）
+- [ ] 后端 Skills API：读取 ~/.claude/skills/ 全局技能列表
+- [ ] 后端 Skills API：读取项目级 .claude/skills/ 技能列表
+- [ ] 后端 Skills API：创建新技能（写入 SKILL.md）
+- [ ] 后端 Skills API：编辑技能内容
+- [ ] 后端 Skills API：删除技能
+- [ ] 后端配置 API：读写 ~/.claude-pixel-agent/config.json
+- [ ] 配置页面：设置 Claude Code 根目录路径
+- [ ] 配置页面：连接状态诊断（是否检测到 ~/.claude/projects/）
+- [ ] Skills 管理页面：全局技能列表 + 创建/编辑/删除
+- [ ] Skills 管理页面：项目级技能（按项目分组）
+- [ ] Skills 管理页面：SKILL.md 内容编辑器（含 frontmatter）
+- [ ] 英雄面板显示该 Agent 所在项目路径
+- [ ] 更新 vitest 测试覆盖新功能

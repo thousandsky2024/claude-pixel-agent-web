@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectHeroClass, SKILL_DEFINITIONS } from "./routers/agents";
+import { detectHeroClass } from "./routers/agents";
 
 describe("detectHeroClass", () => {
   it("returns warrior when bash usage is dominant", () => {
@@ -23,23 +23,23 @@ describe("detectHeroClass", () => {
   });
 });
 
-describe("SKILL_DEFINITIONS", () => {
-  it("has exactly 6 skills", () => {
-    expect(SKILL_DEFINITIONS).toHaveLength(6);
+describe("Hero class edge cases", () => {
+  it("returns mage when web is exactly 30% of total", () => {
+    // web=3, total=10 => webR=0.3 => mage
+    expect(detectHeroClass({ bash: 3, read: 2, write: 2, web: 3 })).toBe("mage");
   });
 
-  it("all skills have required fields", () => {
-    for (const skill of SKILL_DEFINITIONS) {
-      expect(skill.id).toBeTruthy();
-      expect(skill.name).toBeTruthy();
-      expect(skill.description).toBeTruthy();
-      expect(skill.icon).toBeTruthy();
-      expect(["attack", "magic", "defense", "utility"]).toContain(skill.type);
-    }
+  it("returns cleric when read is exactly 40% of total", () => {
+    // read=4, total=10 => readR=0.4 => cleric
+    expect(detectHeroClass({ bash: 2, read: 4, write: 2, web: 2 })).toBe("cleric");
   });
 
-  it("skill ids are unique", () => {
-    const ids = SKILL_DEFINITIONS.map((s) => s.id);
-    expect(new Set(ids).size).toBe(ids.length);
+  it("returns warrior when bash is exactly 35% of total", () => {
+    // bash=7, total=20 => bashR=0.35 => warrior
+    expect(detectHeroClass({ bash: 7, read: 5, write: 4, web: 4 })).toBe("warrior");
+  });
+
+  it("prefers warrior over mage when bash is higher", () => {
+    expect(detectHeroClass({ bash: 8, read: 1, write: 1, web: 5 })).toBe("warrior");
   });
 });

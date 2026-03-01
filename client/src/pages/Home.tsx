@@ -19,6 +19,7 @@ export default function Home() {
   );
 
   const refetchHeroes = trpc.agents.list.useQuery(undefined, { enabled: false });
+  const { data: trackedProjects } = trpc.agents.trackedProjects.useQuery(undefined, { refetchInterval: 5000 });
 
   const stats = useMemo(() => {
     const active = heroes.filter(
@@ -271,7 +272,10 @@ export default function Home() {
 
       {/* Skills Manager Modal */}
       {showSkillsManager && (
-        <SkillsManager onClose={() => setShowSkillsManager(false)} />
+        <SkillsManager
+          onClose={() => setShowSkillsManager(false)}
+          projects={trackedProjects ?? []}
+        />
       )}
     </div>
   );
