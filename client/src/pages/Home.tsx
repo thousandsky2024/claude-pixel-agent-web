@@ -34,7 +34,7 @@ export default function Home() {
 
   return (
     <div
-      className="min-h-screen flex flex-col bg-[#06060f] text-white overflow-hidden"
+      className="h-screen flex flex-col bg-[#06060f] text-white overflow-hidden"
       style={{ fontFamily: "'IBM Plex Mono', 'Courier New', monospace" }}
     >
       {/* ── Header ── */}
@@ -271,7 +271,7 @@ export default function Home() {
         </div>
 
         {/* Center - Dungeon Map */}
-        <div className="flex-1 relative bg-[#06060f] overflow-hidden">
+        <div className="flex-1 relative bg-[#06060f] overflow-hidden" style={{ minHeight: 0 }}>
           <DungeonMap
             heroes={heroes}
             selectedHeroId={selectedHeroId}
