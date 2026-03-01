@@ -166,3 +166,15 @@
 - [x] 修复 Boss 在法阵正中心（用 (c0+c1+1)/2*TS 公式，修复半格偏差）
 - [x] Witch 的英雄目标位置改为 Witch 右侧 3 格（col=33，在可走区域 22-37 内）
 - [x] 英雄面向 Witch 时面向左（facingLeft=true，因为 Witch 在英雄左侧）
+
+## Phase 20: Boss位置和墙壁修复
+- [x] 测量背景图法阵圆圈实际中心像素位置（Python 像素分析：原始图 x=2304, y=788 → canvas x=2813, y=985）
+- [x] 修复 Boss X 坐标确定为 BOSS_SCREEN_X=2813, BOSS_SCREEN_Y=985
+- [x] 英雄攻击 Boss 距离改为 2 格（col=57，贴近 Boss）
+
+## Phase 21: 固定地图尺寸（去除缩放）
+- [x] Canvas 固定为 3360x1920，不随窗口缩放
+- [x] 地图容器改为可滚动（overflow-auto）
+- [x] 移除 scaleX/scaleY 坐标转换，点击坐标直接使用 CSS 像素
+- [x] Boss 坐标硬编码为法阵实际中心 (2813, 985)
+- [x] 验证英雄不进墙、Boss 在法阵中心

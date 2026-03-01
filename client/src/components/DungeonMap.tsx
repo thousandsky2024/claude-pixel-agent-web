@@ -77,8 +77,9 @@ const ROOM_CENTERS: Record<RoomId, { col: number; row: number }> = {
   spawn:   roomCenter(ROOMS.spawn),
   // Dungeon: heroes stop 2 tiles to the LEFT of Guardian center (in front of Guardian for dialogue)
   dungeon: { col: Math.floor((ROOMS.dungeon.c0 + ROOMS.dungeon.c1) / 2) - 2, row: Math.floor((ROOMS.dungeon.r0 + ROOMS.dungeon.r1) / 2) },
-  // Boss: heroes stop 5 tiles to the LEFT of boss center (in front of boss for combat)
-  boss:    { col: Math.round((ROOMS.boss.c0 + ROOMS.boss.c1 + 1) / 2) - 5, row: Math.round((ROOMS.boss.r0 + ROOMS.boss.r1 + 1) / 2) },
+  // Boss: heroes stop 2 tiles to the LEFT of boss (close combat, col=57)
+  // Boss is at col=58.6, so col=57 puts hero right next to boss
+  boss:    { col: 57, row: 21 },
   // Shop: heroes stop 3 tiles to the RIGHT of witch center (witch is on the left)
   shop:    { col: Math.round((ROOMS.shop.c0 + ROOMS.shop.c1 + 1) / 2) + 3, row: Math.floor((ROOMS.shop.r0 + ROOMS.shop.r1) / 2) },
   rest:    roomCenter(ROOMS.rest),
@@ -375,10 +376,11 @@ function drawGuardian(ctx: CanvasRenderingContext2D, x: number, y: number, tick:
 }
 
 // ─── NPC/Boss screen positions (pixel coords, used for hero facing direction) ──
-// Boss is at center of boss room
-// Use true room center: (c0 + c1 + 1) / 2 * TS gives exact pixel center
-const BOSS_SCREEN_X = ((ROOMS.boss.c0 + ROOMS.boss.c1 + 1) / 2) * TS;
-const BOSS_SCREEN_Y = ((ROOMS.boss.r0 + ROOMS.boss.r1 + 1) / 2) * TS;
+// Boss is at the ACTUAL pentagram center in the background image
+// Measured by pixel analysis: canvas px=(2813, 985) = tile(col=58.6, row=20.5)
+// Background image (2752x1536) is scaled to canvas (3360x1920), scale=(1.221, 1.25)
+const BOSS_SCREEN_X = 2813;
+const BOSS_SCREEN_Y = 985;
 // Guardian is at center of dungeon room
 const GUARDIAN_SCREEN_X = ((ROOMS.dungeon.c0 + ROOMS.dungeon.c1 + 1) / 2) * TS;
 const GUARDIAN_SCREEN_Y = ((ROOMS.dungeon.r0 + ROOMS.dungeon.r1 + 1) / 2) * TS;
@@ -855,35 +857,19 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
   const prevHeroIdsRef = useRef<Set<number>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Set canvas internal resolution and CSS size to fill container width (maintain aspect ratio)
+  // Fixed canvas size - no scaling. Canvas is always 3360x1920 (70x40 tiles at 48px each).
+  // Container scrolls to view the full map. This ensures pixel-perfect positions for
+  // Boss, heroes, walls, and all game elements.
   useEffect(() => {
     const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
-
-    const CANVAS_W = MAP_COLS * TS;
-    const CANVAS_H = MAP_ROWS * TS;
+    if (!canvas) return;
+    const CANVAS_W = MAP_COLS * TS; // 3360
+    const CANVAS_H = MAP_ROWS * TS; // 1920
     canvas.width = CANVAS_W;
     canvas.height = CANVAS_H;
-
-    const fitCanvas = () => {
-      const cw = container.clientWidth;
-      const ch = container.clientHeight;
-      // Fill the container completely (slight stretch is acceptable for immersive feel)
-      canvas.style.width = `${cw}px`;
-      canvas.style.height = `${ch}px`;
-    };
-
-    // Use rAF to ensure DOM is fully laid out before measuring
-    let rafId = requestAnimationFrame(() => {
-      fitCanvas();
-    });
-    const ro = new ResizeObserver(fitCanvas);
-    ro.observe(container);
-    return () => {
-      cancelAnimationFrame(rafId);
-      ro.disconnect();
-    };
+    // CSS size matches internal resolution exactly - no scaling
+    canvas.style.width = `${CANVAS_W}px`;
+    canvas.style.height = `${CANVAS_H}px`;
   }, []);
 
   const drawFrame = useCallback(() => {
@@ -1122,11 +1108,18 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
-      // Convert CSS coords → canvas coords
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-      const mx = (e.clientX - rect.left) * scaleX;
-      const my = (e.clientY - rect.top) * scaleY;
+      // Canvas is fixed 1:1 with CSS pixels (no scaling), so no conversion needed
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+
+      // Debug: log canvas coordinates on click when ?debug=1
+      if (new URLSearchParams(window.location.search).get('debug') === '1') {
+        const col = Math.floor(mx / TS);
+        const row = Math.floor(my / TS);
+        console.log(`[DEBUG CLICK] px=(${Math.round(mx)}, ${Math.round(my)}) tile=(col=${col}, row=${row})`);
+        alert(`Canvas click: px=(${Math.round(mx)}, ${Math.round(my)})\ntile=(col=${col}, row=${row})`);
+        return;
+      }
 
       for (const hero of heroes) {
         const mv = movementRef.current.get(hero.id);
@@ -1143,11 +1136,11 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
   );
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-hidden flex items-center justify-center bg-[#0a0810]">
+    <div ref={containerRef} className="w-full h-full overflow-auto bg-[#0a0810]">
       <canvas
         ref={canvasRef}
         onClick={handleClick}
-        className="cursor-pointer"
+        className="cursor-pointer block"
         style={{ imageRendering: "pixelated" }}
       />
     </div>
