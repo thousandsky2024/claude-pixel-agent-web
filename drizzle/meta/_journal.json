@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1772339259614,
+      "tag": "0000_chief_johnny_blaze",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,9 +1,11 @@
 /**
  * Home Page - Claude Pixel Agent Visualizer
+ * Supports both DEMO and LIVE modes with real-time Claude Code monitoring
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Play, Pause, RotateCcw, Clipboard } from 'lucide-react';
+import { Upload, Play, Pause, RotateCcw, Clipboard, Zap } from 'lucide-react';
+import { useAuth } from '@/_core/hooks/useAuth';
 import PixelOffice from '@/components/PixelOffice';
 import AgentPanel from '@/components/AgentPanel';
 import StatsPanel from '@/components/StatsPanel';
@@ -11,10 +13,16 @@ import TranscriptInput from '@/components/TranscriptInput';
 import { AgentState } from '@/lib/pixelEngine';
 import { parseTranscript } from '@/lib/transcriptParser';
 import { generateMultiAgentTranscript } from '@/lib/mockData';
+import { trpc } from '@/lib/trpc';
 
 const NEON_COLORS = ['#00FF41', '#00D9FF', '#FF00FF', '#FFD700', '#FF0055', '#00FF88'];
 
+type Mode = 'demo' | 'live';
+
 export default function Home() {
+  const { user } = useAuth();
+  
+  const [mode, setMode] = useState<Mode>('demo');
   const [agents, setAgents] = useState<AgentState[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<AgentState | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -24,6 +32,82 @@ export default function Home() {
   const [totalCost, setTotalCost] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // WebSocket connection for live mode
+  useEffect(() => {
+    if (mode !== 'live') {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      return;
+    }
+
+    // Connect to WebSocket for live monitoring
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws/agents`);
+
+    ws.onopen = () => {
+      console.log('Connected to live agent monitoring');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'agent-update') {
+          updateAgentFromLive(data.payload);
+        } else if (data.type === 'agents-batch') {
+          setAgents(data.payload);
+          if (data.payload.length > 0) {
+            setSelectedAgent(data.payload[0]);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to parse WebSocket message:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    wsRef.current = ws;
+
+    return () => {
+      ws.close();
+    };
+  }, [mode]);
+
+  // Update single agent from live data
+  const updateAgentFromLive = (agentData: any) => {
+    setAgents((prev) => {
+      const existing = prev.find((a) => a.id === agentData.id);
+      if (existing) {
+        return prev.map((a) =>
+          a.id === agentData.id
+            ? {
+                ...a,
+                state: agentData.state,
+                position: agentData.position || a.position,
+              }
+            : a
+        );
+      }
+      return [
+        ...prev,
+        {
+          id: agentData.id,
+          name: agentData.name,
+          position: agentData.position || { x: 5, y: 5 },
+          direction: 'down' as const,
+          state: agentData.state,
+          color: NEON_COLORS[prev.length % NEON_COLORS.length],
+          animationFrame: 0,
+        },
+      ];
+    });
+  };
 
   // Handle file upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -162,6 +246,13 @@ export default function Home() {
     return 'bg-accent text-background border-accent hover:bg-background hover:text-accent';
   };
 
+  const getModeButtonClass = (isActive: boolean) => {
+    if (isActive) {
+      return 'bg-accent text-background border-accent';
+    }
+    return 'bg-background text-foreground border-border';
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground overflow-hidden">
       {/* Header */}
@@ -176,8 +267,10 @@ export default function Home() {
             </p>
           </div>
           <div className="text-right">
-            <p className="text-xs text-muted-foreground uppercase tracking-widest">v1.0</p>
-            <p className="text-xs text-muted-foreground uppercase tracking-widest">ONLINE</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-widest">v2.0</p>
+            <p className={`text-xs uppercase tracking-widest ${mode === 'live' ? 'neon-glow-green' : 'text-muted-foreground'}`}>
+              {mode === 'live' ? 'LIVE' : 'DEMO'}
+            </p>
           </div>
         </div>
       </header>
@@ -187,29 +280,53 @@ export default function Home() {
         {/* Left Sidebar - Controls */}
         <div className="w-64 border-r-4 border-accent bg-card overflow-y-auto">
           <div className="p-4 space-y-4">
-            {/* Upload Section */}
+            {/* Mode Toggle */}
             <div className="pixel-panel p-4">
               <h2 className="text-sm font-bold neon-glow-blue uppercase mb-3 tracking-widest">
-                LOAD TRANSCRIPT
+                MODE
               </h2>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full px-4 py-2 bg-accent text-background font-bold uppercase text-sm border-2 border-accent hover:bg-background hover:text-accent transition-colors mb-2 flex items-center justify-center gap-2"
-              >
-                <Upload size={16} />
-                UPLOAD FILE
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".jsonl,.json,.txt"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              <p className="text-xs text-muted-foreground uppercase tracking-widest mt-2">
-                Supports JSONL format
-              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setMode('demo')}
+                  className={`flex-1 px-3 py-2 font-bold uppercase text-xs border-2 transition-colors ${getModeButtonClass(mode === 'demo')}`}
+                >
+                  DEMO
+                </button>
+                <button
+                  onClick={() => setMode('live')}
+                  className={`flex-1 px-3 py-2 font-bold uppercase text-xs border-2 transition-colors flex items-center justify-center gap-1 ${getModeButtonClass(mode === 'live')}`}
+                >
+                  <Zap size={12} />
+                  LIVE
+                </button>
+              </div>
             </div>
+
+            {/* Upload Section */}
+            {mode === 'demo' && (
+              <div className="pixel-panel p-4">
+                <h2 className="text-sm font-bold neon-glow-blue uppercase mb-3 tracking-widest">
+                  LOAD TRANSCRIPT
+                </h2>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full px-4 py-2 bg-accent text-background font-bold uppercase text-sm border-2 border-accent hover:bg-background hover:text-accent transition-colors mb-2 flex items-center justify-center gap-2"
+                >
+                  <Upload size={16} />
+                  UPLOAD FILE
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".jsonl,.json,.txt"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+                <p className="text-xs text-muted-foreground uppercase tracking-widest mt-2">
+                  Supports JSONL format
+                </p>
+              </div>
+            )}
 
             {/* Control Section */}
             <div className="pixel-panel p-4">
@@ -238,13 +355,15 @@ export default function Home() {
                 <RotateCcw size={16} />
                 RESET
               </button>
-              <button
-                onClick={loadDemoData}
-                className="w-full px-4 py-2 bg-secondary text-background font-bold uppercase text-sm border-2 border-secondary hover:bg-background hover:text-secondary transition-colors mt-2 flex items-center justify-center gap-2"
-              >
-                <Clipboard size={16} />
-                DEMO
-              </button>
+              {mode === 'demo' && (
+                <button
+                  onClick={loadDemoData}
+                  className="w-full px-4 py-2 bg-secondary text-background font-bold uppercase text-sm border-2 border-secondary hover:bg-background hover:text-secondary transition-colors mt-2 flex items-center justify-center gap-2"
+                >
+                  <Clipboard size={16} />
+                  DEMO
+                </button>
+              )}
             </div>
 
             {/* Agents List */}
@@ -285,13 +404,15 @@ export default function Home() {
             />
 
             {/* Paste Transcript Button */}
-            <button
-              onClick={() => setShowTranscriptInput(true)}
-              className="w-full px-4 py-2 bg-accent text-background font-bold uppercase text-sm border-2 border-accent hover:bg-background hover:text-accent transition-colors flex items-center justify-center gap-2"
-            >
-              <Clipboard size={16} />
-              PASTE
-            </button>
+            {mode === 'demo' && (
+              <button
+                onClick={() => setShowTranscriptInput(true)}
+                className="w-full px-4 py-2 bg-accent text-background font-bold uppercase text-sm border-2 border-accent hover:bg-background hover:text-accent transition-colors flex items-center justify-center gap-2"
+              >
+                <Clipboard size={16} />
+                PASTE
+              </button>
+            )}
           </div>
         </div>
 
@@ -310,9 +431,13 @@ export default function Home() {
             />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center">
-              <p className="text-2xl font-bold neon-glow-blue uppercase mb-4">NO AGENTS LOADED</p>
+              <p className="text-2xl font-bold neon-glow-blue uppercase mb-4">
+                {mode === 'live' ? 'WAITING FOR CLAUDE CODE...' : 'NO AGENTS LOADED'}
+              </p>
               <p className="text-sm text-muted-foreground uppercase tracking-widest">
-                Upload a Claude Code transcript to begin
+                {mode === 'live'
+                  ? 'Start Claude Code to see agents appear'
+                  : 'Upload a Claude Code transcript to begin'}
               </p>
             </div>
           )}
