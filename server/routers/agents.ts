@@ -675,4 +675,28 @@ export const agentsRouter = router({
 
   // ── Room Positions ────────────────────────────────────────────────────────────
   roomPositions: publicProcedure.query(() => ROOM_POSITIONS),
+
+  // ── Bridge API Key ────────────────────────────────────────────────────────────
+  bridgeApiKey: publicProcedure.query(() => {
+    // Read bridge API key from ~/.claude-pixel-agent/config.json
+    const bridgeConfigPath = path.join(DATA_DIR, "config.json");
+    try {
+      if (fs.existsSync(bridgeConfigPath)) {
+        const cfg = JSON.parse(fs.readFileSync(bridgeConfigPath, "utf-8"));
+        if (cfg.bridgeApiKey) {
+          return { apiKey: cfg.bridgeApiKey as string, exists: true };
+        }
+      }
+    } catch {}
+    // Generate a new key
+    const key = "cpab_" + Array.from({ length: 32 }, () =>
+      Math.random().toString(36)[2]
+    ).join("");
+    ensureDataDir();
+    const existing = fs.existsSync(bridgeConfigPath)
+      ? JSON.parse(fs.readFileSync(bridgeConfigPath, "utf-8"))
+      : {};
+    fs.writeFileSync(bridgeConfigPath, JSON.stringify({ ...existing, bridgeApiKey: key }, null, 2));
+    return { apiKey: key, exists: false };
+  }),
 });

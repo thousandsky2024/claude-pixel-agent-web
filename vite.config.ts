@@ -171,6 +171,8 @@ export default defineConfig({
   server: {
     host: true,
     hmr: false,
+    // Suppress HMR WebSocket connection errors in proxied environments
+    ws: false,
     allowedHosts: [
       ".manuspre.computer",
       ".manus.computer",

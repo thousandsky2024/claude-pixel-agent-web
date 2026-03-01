@@ -60,18 +60,34 @@
 - [x] 最终检查点保存
 
 ## Phase 8: 真实 Claude Code 集成重构
-- [ ] 修复转录监听路径：改为 ~/.claude/projects/**/*.jsonl（按项目组织）
-- [ ] 从文件路径解析项目名称（-home-user-myproject → /home/user/myproject）
-- [ ] 后端 Skills API：读取 ~/.claude/skills/ 全局技能列表
-- [ ] 后端 Skills API：读取项目级 .claude/skills/ 技能列表
-- [ ] 后端 Skills API：创建新技能（写入 SKILL.md）
-- [ ] 后端 Skills API：编辑技能内容
-- [ ] 后端 Skills API：删除技能
-- [ ] 后端配置 API：读写 ~/.claude-pixel-agent/config.json
-- [ ] 配置页面：设置 Claude Code 根目录路径
-- [ ] 配置页面：连接状态诊断（是否检测到 ~/.claude/projects/）
-- [ ] Skills 管理页面：全局技能列表 + 创建/编辑/删除
-- [ ] Skills 管理页面：项目级技能（按项目分组）
-- [ ] Skills 管理页面：SKILL.md 内容编辑器（含 frontmatter）
-- [ ] 英雄面板显示该 Agent 所在项目路径
-- [ ] 更新 vitest 测试覆盖新功能
+- [x] 修复转录监听路径：改为 ~/.claude/projects/**/*.jsonl（按项目组织）
+- [x] 从文件路径解析项目名称（-home-user-myproject → /home/user/myproject）
+- [x] 后端 Skills API：读取 ~/.claude/skills/ 全局技能列表
+- [x] 后端 Skills API：读取项目级 .claude/skills/ 技能列表
+- [x] 后端 Skills API：创建新技能（写入 SKILL.md）
+- [x] 后端 Skills API：编辑技能内容
+- [x] 后端 Skills API：删除技能
+- [x] 后端配置 API：读写 ~/.claude-pixel-agent/config.json
+- [x] 配置页面：设置 Claude Code 根目录路径
+- [x] 配置页面：连接状态诊断（是否检测到 ~/.claude/projects/）
+- [x] Skills 管理页面：全局技能列表 + 创建/编辑/删除
+- [x] Skills 管理页面：项目级技能（按项目分组）
+- [x] Skills 管理页面：SKILL.md 内容编辑器（含 frontmatter）
+- [x] 英雄面板显示该 Agent 所在项目路径
+- [x] 更新 vitest 测试覆盖新功能
+
+## Phase 9: 本地 Bridge 脚本（方案 B）
+
+- [x] 后端添加 Bridge API 端点（接收本地脚本推送的英雄数据）
+- [x] 后端添加 API Key 认证保护 Bridge 端点
+- [x] 开发本地 Bridge 脚本（Node.js，监听 ~/.claude/projects/ 并推送到云端）
+- [x] Bridge 脚本支持 Skills/Agents 文件同步
+- [x] 测试 Bridge 脚本端到端流程
+- [x] 编写用户使用说明（README）
+
+## Phase 10: 最终完善
+- [x] 修复 CSS @import 顺序警告（移到 index.html）
+- [x] 添加 ⚙️ Config 按钮和 ConfigPanel 组件
+- [x] ConfigPanel 显示 Bridge API Key、快速启动命令、连接状态
+- [x] 添加 demo-start/demo-stop WebSocket 消息处理
+- [x] 18 个 vitest 测试全部通过（agents + auth + bridge）

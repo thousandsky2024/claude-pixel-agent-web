@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import DungeonMap from "@/components/DungeonMap";
 import HeroPanel from "@/components/HeroPanel";
 import SkillsManager from "@/components/SkillsManager";
+import ConfigPanel from "@/components/ConfigPanel";
 import { useHeroSocket } from "@/hooks/useHeroSocket";
 import { HERO_CLASSES, STATE_COLORS, STATE_LABELS } from "@/lib/dungeonConfig";
 import { trpc } from "@/lib/trpc";
@@ -12,6 +13,7 @@ export default function Home() {
   const [selectedHeroId, setSelectedHeroId] = useState<number | null>(null);
   const [showSkillsManager, setShowSkillsManager] = useState(false);
   const [showLog, setShowLog] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
 
   const selectedHero = useMemo(
     () => heroes.find((h) => h.id === selectedHeroId) || null,
@@ -103,6 +105,13 @@ export default function Home() {
           </div>
 
           <button
+            onClick={() => setShowConfig(true)}
+            className="px-3 py-1 text-xs font-bold uppercase border border-[#00AAFF] text-[#00AAFF] hover:bg-[#00AAFF] hover:text-black transition-colors rounded"
+          >
+            ⚙️ Config
+          </button>
+
+          <button
             onClick={() => setShowSkillsManager(true)}
             className="px-3 py-1 text-xs font-bold uppercase border border-[#FFAA00] text-[#FFAA00] hover:bg-[#FFAA00] hover:text-black transition-colors rounded"
           >
@@ -184,9 +193,9 @@ export default function Home() {
                     {/* Active tools indicator */}
                     {(hero.activeTools?.length || 0) > 0 && (
                       <div className="mt-0.5 flex gap-0.5">
-                        {hero.activeTools.slice(0, 3).map((t) => (
+                        {hero.activeTools.slice(0, 3).map((t, idx) => (
                           <span
-                            key={t.id}
+                            key={t.id ?? `${hero.id}-tool-${idx}`}
                             className="text-xs bg-[#FF444433] text-red-300 px-1 rounded"
                           >
                             {t.name.slice(0, 4)}
@@ -276,6 +285,11 @@ export default function Home() {
           onClose={() => setShowSkillsManager(false)}
           projects={trackedProjects ?? []}
         />
+      )}
+
+      {/* Config Panel Modal */}
+      {showConfig && (
+        <ConfigPanel onClose={() => setShowConfig(false)} />
       )}
     </div>
   );

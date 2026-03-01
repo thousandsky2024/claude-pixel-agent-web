@@ -486,6 +486,39 @@ function broadcast(message: { type: string; payload: unknown }) {
 
 // ─── Client Message Handling ──────────────────────────────────────────────────
 
+function createDemoHeroes(): Hero[] {
+  const configs: Array<{ name: string; heroClass: HeroClass; state: HeroState; room: DungeonRoom; projectPath: string }> = [
+    { name: "warrior-001", heroClass: "warrior", state: "fighting", room: "boss_arena", projectPath: "/demo/my-project" },
+    { name: "mage-002", heroClass: "mage", state: "casting", room: "boss_arena", projectPath: "/demo/web-app" },
+    { name: "cleric-003", heroClass: "cleric", state: "resting", room: "church", projectPath: "/demo/api-service" },
+  ];
+  return configs.map((d, i) => ({
+    id: 9000 + i,
+    name: d.name,
+    heroClass: d.heroClass,
+    state: d.state,
+    position: { ...ROOM_POSITIONS[d.room] },
+    room: d.room,
+    activeTools: d.state === "fighting"
+      ? [{ id: `demo-tool-${i}`, name: "Bash", status: "⚔️ Running: npm run build", startedAt: Date.now() }]
+      : d.state === "casting"
+      ? [{ id: `demo-tool-${i}`, name: "WebSearch", status: "🔍 Searching: React hooks best practices", startedAt: Date.now() }]
+      : [],
+    subAgentTools: {},
+    toolCount: { bash: 5 + i, read: 3 + i, write: 2 + i, web: 1 + i },
+    isWaiting: d.state === "resting",
+    skills: [],
+    level: i + 1,
+    exp: 50 * (i + 1),
+    hp: 80 + i * 10,
+    maxHp: 100,
+    mp: 60 + i * 15,
+    maxMp: 100,
+    projectPath: d.projectPath,
+    sessionFile: "",
+  }));
+}
+
 function handleClientMessage(msg: Record<string, unknown>) {
   if (msg.type === "clear-heroes") {
     heroes.clear();
@@ -495,8 +528,19 @@ function handleClientMessage(msg: Record<string, unknown>) {
     broadcast({ type: "heroes-batch", payload: [] });
   }
 
+  if (msg.type === "demo-start") {
+    // Generate and broadcast demo heroes
+    const demoHeroes = createDemoHeroes();
+    broadcast({ type: "heroes-batch", payload: demoHeroes });
+  }
+
+  if (msg.type === "demo-stop") {
+    // Switch to live mode: broadcast real persisted heroes
+    broadcast({ type: "heroes-batch", payload: [...heroes.values()] });
+  }
+
   if (msg.type === "demo-mode") {
-    // Demo heroes are created via tRPC, just broadcast current state
+    // Legacy: broadcast current state
     broadcast({ type: "heroes-batch", payload: [...heroes.values()] });
   }
 }
@@ -534,4 +578,56 @@ export function initializeWebSocket(server: unknown) {
 
 export function getHeroes(): Hero[] {
   return [...heroes.values()];
+}
+
+// ─── Bridge Callbacks (for REST Bridge API) ───────────────────────────────────
+
+/**
+ * Returns callback functions that the Bridge REST API can use to inject
+ * hero data received from the local bridge script into the WebSocket broadcast.
+ */
+export function getBroadcastCallbacks() {
+  return {
+    onHeroNew: (heroData: Record<string, unknown>) => {
+      const hero = heroData as unknown as Hero;
+      heroes.set(hero.id, hero);
+      if (hero.id >= nextHeroId) nextHeroId = hero.id + 1;
+      if (hero.sessionFile) fileToHeroId.set(hero.sessionFile, hero.id);
+      persistHeroes();
+      broadcast({ type: "hero-new", payload: hero });
+      console.log(`[Bridge] New hero received: ${hero.name}`);
+    },
+
+    onHeroUpdate: (heroData: Record<string, unknown>) => {
+      const hero = heroData as unknown as Hero;
+      heroes.set(hero.id, hero);
+      persistHeroes();
+      broadcast({ type: "hero-update", payload: hero });
+    },
+
+    onHeroesBatch: (heroesData: Record<string, unknown>[]) => {
+      // Replace all heroes with the batch from the bridge
+      heroes.clear();
+      fileToHeroId.clear();
+      nextHeroId = 1;
+      for (const heroData of heroesData) {
+        const hero = heroData as unknown as Hero;
+        heroes.set(hero.id, hero);
+        if (hero.id >= nextHeroId) nextHeroId = hero.id + 1;
+        if (hero.sessionFile) fileToHeroId.set(hero.sessionFile, hero.id);
+      }
+      persistHeroes();
+      broadcast({ type: "heroes-batch", payload: [...heroes.values()] });
+      console.log(`[Bridge] Received batch of ${heroesData.length} heroes`);
+    },
+
+    onHeroClear: () => {
+      heroes.clear();
+      fileToHeroId.clear();
+      nextHeroId = 1;
+      persistHeroes();
+      broadcast({ type: "heroes-batch", payload: [] });
+      console.log(`[Bridge] Heroes cleared`);
+    },
+  };
 }

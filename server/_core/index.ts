@@ -7,7 +7,8 @@ import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
-import { initializeWebSocket } from "../websocket";
+import { initializeWebSocket, getBroadcastCallbacks } from "../websocket";
+import { createBridgeRouter } from "../bridge";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -46,6 +47,10 @@ async function startServer() {
   );
   // Initialize WebSocket for real-time agent monitoring
   initializeWebSocket(server);
+
+  // Bridge API — receives data from local Claude Code bridge script
+  const { onHeroUpdate, onHeroNew, onHeroesBatch, onHeroClear } = getBroadcastCallbacks();
+  app.use("/api/bridge", createBridgeRouter(onHeroUpdate, onHeroNew, onHeroesBatch, onHeroClear));
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
