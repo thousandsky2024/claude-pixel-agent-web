@@ -178,3 +178,10 @@
 - [x] 移除 scaleX/scaleY 坐标转换，点击坐标直接使用 CSS 像素
 - [x] Boss 坐标硬编码为法阵实际中心 (2813, 985)
 - [x] 验证英雄不进墙、Boss 在法阵中心
+
+## Phase 22: 地图缩放到75%视口 + 墙壁修复
+- [ ] Canvas 用 CSS transform scale 缩放到视口75%（保持内部坐标不变）
+- [ ] 容器改为不滚动，用 transform-origin: top left 缩放
+- [ ] 修复 click 坐标转换（需要除以 scale 比例）
+- [ ] 收紧 WALK_MARGIN，确保英雄不进入墙壁格子
+- [ ] 验证 Boss/NPC 位置在缩放后仍然正确

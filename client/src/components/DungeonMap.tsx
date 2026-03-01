@@ -54,16 +54,20 @@ const ROOMS = {
 
 type RoomId = keyof typeof ROOMS;
 
-// Walkable interior (2-tile margin from walls)
-const WALK_MARGIN = 2;
-function walkableRect(room: typeof ROOMS[RoomId]) {
-  return {
-    c0: room.c0 + WALK_MARGIN,
-    r0: room.r0 + WALK_MARGIN,
-    c1: room.c1 - WALK_MARGIN,
-    r1: room.r1 - WALK_MARGIN,
-  };
-}
+// Per-room walkable rectangles determined by visual inspection of background image grid overlay
+// Each room has different wall thickness; these are the safe interior tile ranges
+const ROOM_WALKABLE: Record<RoomId, { c0: number; r0: number; c1: number; r1: number }> = {
+  // spawn: stone pillars on sides, walkable cols 2-16, rows 2-16
+  spawn:   { c0: 2,  r0: 2,  c1: 16, r1: 16 },
+  // dungeon: walkable cols 22-34 (right wall starts ~col 35), rows 2-16
+  dungeon: { c0: 22, r0: 2,  c1: 34, r1: 16 },
+  // boss: thick left divider wall (~9 tiles), walkable cols 50-67, rows 2-37
+  boss:    { c0: 50, r0: 2,  c1: 67, r1: 37 },
+  // shop: walkable cols 2-16, rows 22-37
+  shop:    { c0: 2,  r0: 22, c1: 16, r1: 37 },
+  // rest: walkable cols 22-37, rows 22-37
+  rest:    { c0: 22, r0: 22, c1: 37, r1: 37 },
+};
 
 // Room center tile (for pathfinding destination)
 function roomCenter(room: typeof ROOMS[RoomId]): { col: number; row: number } {
@@ -74,15 +78,17 @@ function roomCenter(room: typeof ROOMS[RoomId]): { col: number; row: number } {
 }
 
 const ROOM_CENTERS: Record<RoomId, { col: number; row: number }> = {
-  spawn:   roomCenter(ROOMS.spawn),
-  // Dungeon: heroes stop 2 tiles to the LEFT of Guardian center (in front of Guardian for dialogue)
-  dungeon: { col: Math.floor((ROOMS.dungeon.c0 + ROOMS.dungeon.c1) / 2) - 2, row: Math.floor((ROOMS.dungeon.r0 + ROOMS.dungeon.r1) / 2) },
-  // Boss: heroes stop 2 tiles to the LEFT of boss (close combat, col=57)
-  // Boss is at col=58.6, so col=57 puts hero right next to boss
+  // Spawn: center of walkable area (cols 2-17, rows 2-17)
+  spawn:   { col: 9, row: 9 },
+  // Dungeon: walkable area is cols 22-34. Guardian is at col~30.
+  // Heroes stop at col=28 (2 tiles left of Guardian, facing right toward Guardian)
+  dungeon: { col: 28, row: 9 },
+  // Boss: heroes stop at col=57 (2 tiles left of boss at col=58.6)
   boss:    { col: 57, row: 21 },
-  // Shop: heroes stop 3 tiles to the RIGHT of witch center (witch is on the left)
-  shop:    { col: Math.round((ROOMS.shop.c0 + ROOMS.shop.c1 + 1) / 2) + 3, row: Math.floor((ROOMS.shop.r0 + ROOMS.shop.r1) / 2) },
-  rest:    roomCenter(ROOMS.rest),
+  // Shop: walkable cols 2-17, witch is at col~10, heroes stop at col=13 (right of witch)
+  shop:    { col: 13, row: 29 },
+  // Rest: center of walkable area (cols 22-37, rows 22-37)
+  rest:    { col: 29, row: 29 },
 };
 
 // ─── Walkable grid ────────────────────────────────────────────────────────────
@@ -93,9 +99,8 @@ function buildWalkableGrid(): boolean[][] {
     new Array(MAP_COLS).fill(false)
   );
 
-  // Mark each room's interior as walkable
-  for (const room of Object.values(ROOMS)) {
-    const w = walkableRect(room);
+  // Mark each room's interior as walkable using per-room measured margins
+  for (const w of Object.values(ROOM_WALKABLE)) {
     for (let r = w.r0; r <= w.r1; r++) {
       for (let c = w.c0; c <= w.c1; c++) {
         if (r >= 0 && r < MAP_ROWS && c >= 0 && c < MAP_COLS) {
@@ -106,18 +111,19 @@ function buildWalkableGrid(): boolean[][] {
   }
 
   // Add corridor connections between rooms (4-tile wide passages aligned with arch positions)
-  // spawn ↔ dungeon: HORIZONTAL corridor at cols 17-22, rows 8-11 (arch center ~row 9-10)
-  for (let r = 8; r <= 11; r++) for (let c = 17; c <= 22; c++) grid[r][c] = true;
-  // dungeon ↔ boss: HORIZONTAL corridor at cols 37-42, rows 8-11
-  for (let r = 8; r <= 11; r++) for (let c = 37; c <= 42; c++) grid[r][c] = true;
-  // spawn ↔ shop: VERTICAL corridor at rows 17-22, cols 7-12 (arch center ~col 9-10)
-  for (let c = 7; c <= 12; c++) for (let r = 17; r <= 22; r++) grid[r][c] = true;
-  // dungeon ↔ rest: VERTICAL corridor at rows 17-22, cols 27-32 (arch center ~col 29-30)
-  for (let c = 27; c <= 32; c++) for (let r = 17; r <= 22; r++) grid[r][c] = true;
-  // shop ↔ rest: HORIZONTAL corridor at cols 17-22, rows 27-32 (arch center ~row 29-30)
-  for (let r = 27; r <= 32; r++) for (let c = 17; c <= 22; c++) grid[r][c] = true;
-  // boss ↔ rest: VERTICAL corridor at rows 17-22, cols 37-42
-  for (let r = 17; r <= 22; r++) for (let c = 37; c <= 42; c++) grid[r][c] = true;
+  // spawn ↔ dungeon: HORIZONTAL corridor cols 16-22, rows 8-11 (connects spawn c1=16 to dungeon c0=22)
+  for (let r = 8; r <= 11; r++) for (let c = 16; c <= 22; c++) grid[r][c] = true;
+  // dungeon ↔ boss: HORIZONTAL corridor cols 34-50, rows 8-11 (spans thick divider wall)
+  for (let r = 8; r <= 11; r++) for (let c = 34; c <= 50; c++) grid[r][c] = true;
+  // spawn ↔ shop: VERTICAL corridor cols 7-12, rows 16-22 (connects spawn r1=16 to shop r0=22)
+  for (let c = 7; c <= 12; c++) for (let r = 16; r <= 22; r++) grid[r][c] = true;
+  // dungeon ↔ rest: VERTICAL corridor cols 27-32, rows 16-22 (connects dungeon r1=16 to rest r0=22)
+  for (let c = 27; c <= 32; c++) for (let r = 16; r <= 22; r++) grid[r][c] = true;
+  // shop ↔ rest: HORIZONTAL corridor cols 16-22, rows 27-32 (connects shop c1=16 to rest c0=22)
+  for (let r = 27; r <= 32; r++) for (let c = 16; c <= 22; c++) grid[r][c] = true;
+  // boss ↔ rest: HORIZONTAL corridor spanning cols 37-50, rows 35-38
+  // (connects rest c1=37 to boss c0=50 through the bottom arch of boss arena)
+  for (let r = 35; r <= 38; r++) for (let c = 37; c <= 50; c++) grid[r][c] = true;
 
   return grid;
 }
@@ -863,13 +869,14 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const CANVAS_W = MAP_COLS * TS; // 3360
-    const CANVAS_H = MAP_ROWS * TS; // 1920
+    const CANVAS_W = MAP_COLS * TS; // 3360 internal pixels
+    const CANVAS_H = MAP_ROWS * TS; // 1920 internal pixels
     canvas.width = CANVAS_W;
     canvas.height = CANVAS_H;
-    // CSS size matches internal resolution exactly - no scaling
-    canvas.style.width = `${CANVAS_W}px`;
-    canvas.style.height = `${CANVAS_H}px`;
+    // Display at 50% scale so the full map fits on a Mac screen (1680x960 CSS pixels)
+    const DISPLAY_SCALE = 0.5;
+    canvas.style.width = `${CANVAS_W * DISPLAY_SCALE}px`;
+    canvas.style.height = `${CANVAS_H * DISPLAY_SCALE}px`;
   }, []);
 
   const drawFrame = useCallback(() => {
@@ -981,8 +988,7 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
             const heroesInRoom = heroes.filter(h => heroRoomToRoomId(h.room) === mv.targetRoom);
             const idx = heroesInRoom.findIndex(h => h.id === hero.id);
             if (heroesInRoom.length > 1 && idx >= 0) {
-              const room = ROOMS[mv.targetRoom];
-              const w = walkableRect(room);
+              const w = ROOM_WALKABLE[mv.targetRoom];
               const usableW = (w.c1 - w.c0) * TS;
               const cols = Math.min(heroesInRoom.length, 4);
               const col = idx % cols;
@@ -1108,9 +1114,10 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
-      // Canvas is fixed 1:1 with CSS pixels (no scaling), so no conversion needed
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
+      // Canvas is displayed at 50% scale, so convert CSS pixels → canvas pixels
+      const DISPLAY_SCALE = 0.5;
+      const mx = (e.clientX - rect.left) / DISPLAY_SCALE;
+      const my = (e.clientY - rect.top) / DISPLAY_SCALE;
 
       // Debug: log canvas coordinates on click when ?debug=1
       if (new URLSearchParams(window.location.search).get('debug') === '1') {
@@ -1136,7 +1143,7 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
   );
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-auto bg-[#0a0810]">
+    <div ref={containerRef} className="w-full h-full overflow-hidden bg-[#0a0810] flex items-start justify-start">
       <canvas
         ref={canvasRef}
         onClick={handleClick}
