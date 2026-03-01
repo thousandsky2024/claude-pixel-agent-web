@@ -17,19 +17,25 @@ const CANVAS_H = 600;
 // ─── Hero Sprite Rendering ────────────────────────────────────────────────────
 
 const heroImages: Record<string, HTMLImageElement> = {};
-const dungeonBgImage = new Image();
-dungeonBgImage.src = ASSETS.dungeonMap;
+
+function loadImage(src: string): HTMLImageElement {
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.src = src;
+  return img;
+}
+
+const dungeonBgImage = loadImage(ASSETS.dungeonMap);
 
 function getHeroImage(heroClass: string): HTMLImageElement {
   if (!heroImages[heroClass]) {
-    const img = new Image();
-    img.src =
+    heroImages[heroClass] = loadImage(
       heroClass === "warrior"
         ? ASSETS.heroWarrior
         : heroClass === "mage"
         ? ASSETS.heroMage
-        : ASSETS.heroCleric;
-    heroImages[heroClass] = img;
+        : ASSETS.heroCleric
+    );
   }
   return heroImages[heroClass];
 }

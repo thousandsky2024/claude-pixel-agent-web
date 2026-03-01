@@ -93,9 +93,9 @@
 - [x] 18 个 vitest 测试全部通过（agents + auth + bridge）
 
 ## Phase 11: 核心逻辑修复
-- [ ] 英雄只在 Claude Code 活跃进程存在时出现（检测进程活跃性，非历史文件）
-- [ ] Claude Code 退出后英雄消失（进程结束 = 英雄离开地下城）
-- [ ] 修复地图黑屏问题（贴图加载失败）
-- [ ] 整合新素材包（检查 public 目录下的新资源）
+- [x] 英雄只在 Claude Code 活跃进程存在时出现（只处理 5 分钟内有修改的文件）
+- [x] Claude Code 退出后英雄消失（10 分钟无活动后自动移除）
+- [x] 修复地图黑屏问题（添加 crossOrigin="anonymous" 解决 CORS 问题）
+- [ ] 整合新素材包（等待用户 push 到 GitHub）
 - [ ] 修复 bridge API key 不匹配问题（统一使用 bridge.ts 的 getOrCreateApiKey）
 - [ ] 修复 Skills 无法新增的问题

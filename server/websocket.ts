@@ -29,8 +29,12 @@ const CLAUDE_DIR = path.join(HOME_DIR, ".claude");
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_DIR, "projects");
 const DATA_DIR = path.join(HOME_DIR, ".claude-pixel-agent");
 const HEROES_PATH = path.join(DATA_DIR, "heroes.json");
-const POLL_INTERVAL_MS = 500;
-const IDLE_DELAY_MS = 8000;
+const POLL_INTERVAL_MS = 1000;
+const IDLE_DELAY_MS = 10000;
+// A session file must have been modified within this window to be considered "active"
+const ACTIVE_SESSION_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+// After this long with no file changes, remove the hero entirely
+const SESSION_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +46,8 @@ const idleTimers = new Map<number, NodeJS.Timeout>();
 const fileOffsets = new Map<number, number>();
 const fileToHeroId = new Map<string, number>(); // transcript file path → hero id
 const projectDirWatchers = new Map<string, fs.FSWatcher>(); // project dir → watcher
+const fileLastActivity = new Map<number, number>(); // heroId → last activity timestamp
+const expiryTimers = new Map<number, NodeJS.Timeout>(); // heroId → expiry timer
 let nextHeroId = 1;
 let projectsRootWatcher: fs.FSWatcher | null = null;
 let rootPollTimer: NodeJS.Timeout | null = null;
@@ -60,18 +66,15 @@ function persistHeroes() {
 }
 
 function loadPersistedHeroes() {
+  // We intentionally do NOT restore persisted heroes on startup.
+  // Heroes represent active Claude Code sessions — if the server restarted,
+  // all sessions are considered ended. They will reappear when Claude Code
+  // writes new activity to the transcript files.
   ensureDataDir();
+  // Clear any stale heroes.json
   try {
     if (fs.existsSync(HEROES_PATH)) {
-      const saved: Hero[] = JSON.parse(fs.readFileSync(HEROES_PATH, "utf-8"));
-      for (const h of saved) {
-        heroes.set(h.id, h);
-        if (h.id >= nextHeroId) nextHeroId = h.id + 1;
-        // Re-register file mapping
-        if (h.sessionFile) {
-          fileToHeroId.set(h.sessionFile, h.id);
-        }
-      }
+      fs.writeFileSync(HEROES_PATH, JSON.stringify([]));
     }
   } catch {}
 }
@@ -199,6 +202,44 @@ function setHeroResting(heroId: number) {
 function clearIdleTimer(heroId: number) {
   const t = idleTimers.get(heroId);
   if (t) { clearTimeout(t); idleTimers.delete(heroId); }
+}
+
+/**
+ * Remove a hero completely (session ended / expired)
+ */
+function removeHero(heroId: number) {
+  const hero = heroes.get(heroId);
+  if (!hero) return;
+
+  // Clean up all timers and watchers
+  clearIdleTimer(heroId);
+  const expiry = expiryTimers.get(heroId);
+  if (expiry) { clearTimeout(expiry); expiryTimers.delete(heroId); }
+  const watcher = fileWatchers.get(heroId);
+  if (watcher) { try { watcher.close(); } catch {} fileWatchers.delete(heroId); }
+  const poll = pollTimers.get(heroId);
+  if (poll) { clearInterval(poll); pollTimers.delete(heroId); }
+
+  // Remove from maps
+  if (hero.sessionFile) fileToHeroId.delete(hero.sessionFile);
+  fileOffsets.delete(heroId);
+  fileLastActivity.delete(heroId);
+  heroes.delete(heroId);
+
+  persistHeroes();
+  broadcast({ type: "heroes-batch", payload: [...heroes.values()] });
+  console.log(`[File Monitor] Hero removed (session ended): ${hero.name}`);
+}
+
+/**
+ * Reset the expiry timer for a hero — called whenever the file has new activity
+ */
+function refreshExpiryTimer(heroId: number) {
+  fileLastActivity.set(heroId, Date.now());
+  const existing = expiryTimers.get(heroId);
+  if (existing) clearTimeout(existing);
+  const t = setTimeout(() => removeHero(heroId), SESSION_EXPIRY_MS);
+  expiryTimers.set(heroId, t);
 }
 
 function scheduleRest(heroId: number, delay: number) {
@@ -374,17 +415,38 @@ function startWatchingFile(heroId: number, filePath: string) {
 
   // Primary: fs.watch
   try {
-    const watcher = fs.watch(filePath, () => readNewLines(heroId, filePath));
+    const watcher = fs.watch(filePath, () => {
+      refreshExpiryTimer(heroId);
+      readNewLines(heroId, filePath);
+    });
     fileWatchers.set(heroId, watcher);
   } catch {}
 
   // Secondary: polling (macOS/Linux reliability)
-  const poll = setInterval(() => readNewLines(heroId, filePath), POLL_INTERVAL_MS);
+  const poll = setInterval(() => {
+    try {
+      const stat = fs.statSync(filePath);
+      const lastKnown = fileLastActivity.get(heroId) || 0;
+      if (stat.mtimeMs > lastKnown) {
+        refreshExpiryTimer(heroId);
+      }
+    } catch {}
+    readNewLines(heroId, filePath);
+  }, POLL_INTERVAL_MS);
   pollTimers.set(heroId, poll);
 }
 
 function handleNewTranscriptFile(filePath: string, projectRealPath: string) {
   if (!filePath.endsWith(".jsonl")) return;
+
+  // Only process files that have been modified recently (active session)
+  try {
+    const stat = fs.statSync(filePath);
+    const ageMs = Date.now() - stat.mtimeMs;
+    if (ageMs > ACTIVE_SESSION_WINDOW_MS) return; // Skip old/historical files
+  } catch {
+    return;
+  }
 
   let heroId = fileToHeroId.get(filePath) ?? null;
 
@@ -396,6 +458,7 @@ function handleNewTranscriptFile(filePath: string, projectRealPath: string) {
     console.log(`[File Monitor] New hero: ${hero.name} | project: ${projectRealPath}`);
   }
 
+  refreshExpiryTimer(heroId);
   startWatchingFile(heroId, filePath);
 }
 
@@ -407,7 +470,7 @@ function watchProjectDir(projectDirPath: string, encodedName: string) {
 
   const realPath = decodeProjectPath(encodedName);
 
-  // Scan existing .jsonl files
+  // Scan existing .jsonl files — only recent ones (active sessions)
   try {
     const files = fs.readdirSync(projectDirPath).filter((f) => f.endsWith(".jsonl"));
     for (const file of files) {
