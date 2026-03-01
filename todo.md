@@ -105,3 +105,9 @@
 - [x] 修复英雄退出检测：缩短超时到 2 分钟 + 15 秒进程检测
 - [x] 整合新素材包到地图和英雄渲染（骨士精灵图 + 女巫商人 NPC + 火把/蜡烛装饰）
 - [x] 全面提升前端视觉效果（平铺背景贴图、真实素材替换像素绘制）
+
+## Phase 13: Another Metroidvania 素材包全面整合
+- [x] 复制 Another Metroidvania Asset Pack 到 client/public/sprites/mv
+- [x] 重写 DungeonMap.tsx：有走廊连接的完整地图布局（Library→Dungeon→Boss Arena，Dungeon→Shop→Tavern）
+- [x] 整合 Lord Wizard Boss、Guardian 敌人、女巫 NPC、火把道具、天花板吊链
+- [x] 18 个 vitest 测试全部通过

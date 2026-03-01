@@ -1,52 +1,85 @@
-# Asset Pack Evaluation
+# Asset Pack Evaluation - Another Metroidvania Asset Pack Vol. 1 ver. 1.7
 
-## Backgrounds (tileable pixel art patterns)
-- `bg_00_dungeon.png` - Dark grey stone brick pattern → use for dungeon floor/walls
-- `bg_00_boss_room.png` - Purple diamond pattern → use for Boss Arena background
-- `bg_00_witch_shop.png` - Purple square pattern → use for Merchant Shop background
-- `bg_00_garden.png` - Green garden pattern
-- `bg_00_library.png` - Library pattern
-- `bg_00_warp_room.png` - Warp room pattern
-- `bg_01_boss_room.png` - Alternative boss room
-- `dungeon.png` / `garden.png` / `library.png` / `witch_shop.png` - Same as bg_00_* variants
+## Tilesets (Backgrounds - 240x160px, tileable)
+- `Tilesets/dungeon/bg_00_dungeon.png` - Dark gray stone bricks
+- `Tilesets/boss room/bg_00_boss_room.png` - Purple ornate pattern
+- `Tilesets/boss room/bg_01_boss_room.png` - Alternative boss room
+- `Tilesets/witch shop/bg_00_witch_shop.png` - Dark purple squares
+- `Tilesets/library/bg_00_library.png` - Library/study room
 
-## Characters
-- `knight/idle_right.png` - Sprite sheet (8 frames) of knight idle animation
-- `knight/char_attack_00_right_anim.gif` - Animated GIF of knight attacking
-- `knight/char_idle_left/right_anim.gif` - Animated idle GIFs
-- `knight/char_run_left/right_anim.gif` - Animated run GIFs
-- `knight/char_resting_static.png` - Static resting pose
+## Player Character (16px tall sprite sheets)
+- `Player Char/going right animations/char_idle_right_anim.png` - 96x16 = 6 frames
+- `Player Char/going right animations/char_run_right_anim.png` - 128x16 = 8 frames
+- `Player Char/going right animations/char_attack_00_right_anim.png` - 160x16 = 10 frames
+- Mirror left versions in `going left animations/`
+
+## Boss (Lord Wizard - 48px tall)
+- `Boss/static-vertical-idle-effect sprites/lord_wizard_idle_anim.png` - 288x48 = 6 frames
+- `Boss/static-vertical-idle-effect sprites/lord_wizard_static.png` - 48x48 single
+- `Boss/facing right animations/lord_wizard_attack_00_right_anim.png` - 480x48 = 10 frames
+
+## Enemies
+- Guardian: `Enemies/Guardian/facing right/guardian_idle_right_anim.png` - 192x16 = 12 frames
+- Zombie: `Enemies/Zombie/going right animations/zombie_idle_right_anim.png` - 96x16 = 6 frames
+- Others: Bateye, Magician, Painting Ghost, Ratto, Spike Slug, Worm
 
 ## NPCs
-- `npcs/witch_merchant_idle.png` - Sprite sheet (8 frames) of witch merchant
-- `npcs/witch_merchant_static.png` - Static witch merchant
-- `npcs/item_sell_orb.png` - Magic orb item
+- `NPCS/shop/witch_merchant_idle.png` - 320x32 = 10 frames (32px tall)
 
 ## Props
-- `props/candle.png` - Candle
-- `props/torch.png` - Torch
-- `props/ceiling_chain_00/01_static.png` - Ceiling chains
-- `props/skulls_00_static.png` - Skulls decoration
-- `props/goddess_bench_saving_effect.gif` - Animated save point bench
-- `props/chair_00/01.png`, `table_and_chair_static.png` - Furniture
-- `props/vase_with_plant_00/01/02.png` - Decorative vases
-- `props/wall_painting_00/01_static.png` - Wall paintings
-- `props/wall_red_tapestry_static.png` - Red tapestry
+- Light sources: `Props/light source/light_source_0X_anim.png` - 64x16 = 4 frames each
+- Static: ceiling_chain, skulls, table_and_chair, vases, wall_painting, wall_tapestry
 
-## Tilesets
-- Full tileset PNGs for each room type (boss_room, dungeon, garden, library, warp_room, witch_shop)
+## Doors
+- `Doors/cross_scene_door_closed.png` - 64x32 (room door)
+- `Doors/cross_level_door_closed.png` - 192x32 (level door)
+- Animated: opening/closing/locked/unlocked GIFs
 
-## Traps
-- `traps/ground_spikes_static.png`
-- `traps/wall_spikes_left/right.png`
+## Save Point
+- `Save Point/goddess_bench_static.png` - 32x32
+- `Save Point/goddess_bench_saving_effect.png` - animated
 
-## Layout
-- `assets/default-layout.json` - Predefined dungeon layout configuration
+## Effects
+- dust_from_run, explosion_effect_big/small, hit_effect, flying_orb, portal_void
 
-## Usage Plan
-1. Move all sprites to client/public/sprites/ (currently in project root /public/)
-2. Use tileable backgrounds for each room (boss_arena→bg_00_boss_room, shop→bg_00_witch_shop, dungeon floor→bg_00_dungeon)
-3. Use knight sprites for hero rendering (replace pixel-art fallback)
-4. Use witch_merchant for shop NPC
-5. Use props (torch, candle, chains) as room decorations
-6. Sprite sheets need frame extraction: knight idle = 8 frames, witch = 8 frames
+## Design Plan
+
+### Room Layout (connected with corridors):
+```
+[LIBRARY/SANCTUARY] --door-- [DUNGEON CORRIDOR] --door-- [BOSS ARENA]
+                                      |
+                              [MERCHANT SHOP]
+                                      |
+                              [TAVERN/RESTING]
+```
+
+### Room Backgrounds:
+- LIBRARY/SANCTUARY → library/bg_00_library.png
+- DUNGEON CORRIDOR → dungeon/bg_00_dungeon.png
+- BOSS ARENA → boss room/bg_00_boss_room.png
+- MERCHANT SHOP → witch shop/bg_00_witch_shop.png
+- TAVERN → dungeon bg (darker tint)
+
+### Hero State → Animation:
+- idle → char_idle_right_anim (6 frames, 16px)
+- typing/working → char_run_right_anim (8 frames)
+- thinking → char_idle slower fps
+- fighting → char_attack_00_right_anim (10 frames)
+- resting → char_idle at tavern
+
+### Boss in Boss Arena:
+- lord_wizard_idle_anim (6 frames, 48px) - always present
+- When hero fighting: lord_wizard_attack_00_right_anim
+
+### Enemies in Dungeon:
+- guardian_idle in dungeon corridor
+- zombie near tavern
+
+### Corridors:
+- Narrow dungeon-bg strip connecting rooms
+- cross_scene_door at room entrances
+
+### Scale:
+- Hero sprites: 16px → render at 3x = 48px
+- Boss: 48px → render at 2x = 96px
+- Background: 240x160 → tile to fill room
