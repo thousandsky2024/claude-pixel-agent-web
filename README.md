@@ -1,4 +1,6 @@
 # 🏰 Claude Dungeon
+<img width="1200" height="675" alt="image" src="https://github.com/user-attachments/assets/8012ae32-a35f-4e1e-8236-bbba2e135f37" />
+
 
 **Watch your Claude Code agents come alive as pixel-art heroes in a real-time dungeon.**
 
