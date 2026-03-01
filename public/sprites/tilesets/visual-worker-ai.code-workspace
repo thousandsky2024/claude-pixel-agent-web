@@ -1,0 +1,21 @@
+{
+	"folders": [
+		{
+			"name": "visual-worker-ai",
+			"path": "../../../.."
+		},
+		{
+			"name": "Another Metroidvania Asset Pack Vol. 1 ver. 1.7",
+			"path": "../../../../../../Downloads/Another Metroidvania Asset Pack Vol. 1 ver. 1.7"
+		},
+		{
+			"name": "Agent-Reach-main",
+			"path": "../../../../../../Downloads/Agent-Reach-main"
+		},
+		{
+			"name": "pixel-agents-main",
+			"path": "../../../../../../Downloads/pixel-agents-main"
+		}
+	],
+	"settings": {}
+}
