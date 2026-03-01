@@ -78,9 +78,9 @@ const ROOM_CENTERS: Record<RoomId, { col: number; row: number }> = {
   // Dungeon: heroes stop 2 tiles to the LEFT of Guardian center (in front of Guardian for dialogue)
   dungeon: { col: Math.floor((ROOMS.dungeon.c0 + ROOMS.dungeon.c1) / 2) - 2, row: Math.floor((ROOMS.dungeon.r0 + ROOMS.dungeon.r1) / 2) },
   // Boss: heroes stop 5 tiles to the LEFT of boss center (in front of boss for combat)
-  boss:    { col: Math.floor((ROOMS.boss.c0 + ROOMS.boss.c1) / 2) - 5, row: Math.floor((ROOMS.boss.r0 + ROOMS.boss.r1) / 2) },
-  // Shop: heroes stop 3 tiles to the LEFT of witch center (in front of witch for shopping)
-  shop:    { col: Math.floor((ROOMS.shop.c0 + ROOMS.shop.c1) / 2) - 3, row: Math.floor((ROOMS.shop.r0 + ROOMS.shop.r1) / 2) },
+  boss:    { col: Math.round((ROOMS.boss.c0 + ROOMS.boss.c1 + 1) / 2) - 5, row: Math.round((ROOMS.boss.r0 + ROOMS.boss.r1 + 1) / 2) },
+  // Shop: heroes stop 3 tiles to the RIGHT of witch center (witch is on the left)
+  shop:    { col: Math.round((ROOMS.shop.c0 + ROOMS.shop.c1 + 1) / 2) + 3, row: Math.floor((ROOMS.shop.r0 + ROOMS.shop.r1) / 2) },
   rest:    roomCenter(ROOMS.rest),
 };
 
@@ -343,9 +343,10 @@ function drawWitch(ctx: CanvasRenderingContext2D, x: number, y: number, tick: nu
   }
 }
 
-function drawGuardian(ctx: CanvasRenderingContext2D, x: number, y: number, tick: number, heroesPresent: boolean) {
-  if (heroesPresent) {
-    // Guardian reacts to hero presence - uses attack/alert animation (576x32, 18 frames, frameW=32)
+function drawGuardian(ctx: CanvasRenderingContext2D, x: number, y: number, tick: number, _heroesPresent: boolean) {
+  // Guardian always uses idle animation - only boss fight uses attack animations
+  if (false) {
+    // (reserved for future use)
     const frame = Math.floor(tick / 6) % 18;
     drawSprite(ctx, MV.guardianAttack, 32, 32, frame, x, y, 3.5);
     // Alert glow
@@ -375,14 +376,15 @@ function drawGuardian(ctx: CanvasRenderingContext2D, x: number, y: number, tick:
 
 // ─── NPC/Boss screen positions (pixel coords, used for hero facing direction) ──
 // Boss is at center of boss room
-const BOSS_SCREEN_X = Math.floor((ROOMS.boss.c0 + ROOMS.boss.c1) / 2) * TS + TS / 2;
-const BOSS_SCREEN_Y = Math.floor((ROOMS.boss.r0 + ROOMS.boss.r1) / 2) * TS + TS / 2;
+// Use true room center: (c0 + c1 + 1) / 2 * TS gives exact pixel center
+const BOSS_SCREEN_X = ((ROOMS.boss.c0 + ROOMS.boss.c1 + 1) / 2) * TS;
+const BOSS_SCREEN_Y = ((ROOMS.boss.r0 + ROOMS.boss.r1 + 1) / 2) * TS;
 // Guardian is at center of dungeon room
-const GUARDIAN_SCREEN_X = Math.floor((ROOMS.dungeon.c0 + ROOMS.dungeon.c1) / 2) * TS + TS / 2;
-const GUARDIAN_SCREEN_Y = Math.floor((ROOMS.dungeon.r0 + ROOMS.dungeon.r1) / 2) * TS + TS / 2;
+const GUARDIAN_SCREEN_X = ((ROOMS.dungeon.c0 + ROOMS.dungeon.c1 + 1) / 2) * TS;
+const GUARDIAN_SCREEN_Y = ((ROOMS.dungeon.r0 + ROOMS.dungeon.r1 + 1) / 2) * TS;
 // Witch is at center of shop room
-const WITCH_SCREEN_X = Math.floor((ROOMS.shop.c0 + ROOMS.shop.c1) / 2) * TS + TS / 2;
-const WITCH_SCREEN_Y = Math.floor((ROOMS.shop.r0 + ROOMS.shop.r1) / 2) * TS + TS / 2;
+const WITCH_SCREEN_X = ((ROOMS.shop.c0 + ROOMS.shop.c1 + 1) / 2) * TS;
+const WITCH_SCREEN_Y = ((ROOMS.shop.r0 + ROOMS.shop.r1 + 1) / 2) * TS;
 
 function drawBoss(ctx: CanvasRenderingContext2D, tick: number, heroesInRoom: Hero[]) {
   // Boss is exactly at the center of the boss room
@@ -1007,8 +1009,8 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
               // Heroes are to the left of boss, so face right (toward boss)
               mv.facingLeft = false;
             } else if (mv.targetRoom === "shop") {
-              // Heroes are to the left of witch, so face right (toward witch)
-              mv.facingLeft = false;
+              // Heroes are to the RIGHT of witch, so face LEFT (toward witch)
+              mv.facingLeft = true;
             } else if (mv.targetRoom === "dungeon") {
               // Heroes face toward guardian (dynamic based on position)
               mv.facingLeft = mv.px > GUARDIAN_SCREEN_X;

@@ -160,3 +160,9 @@
 - [x] 验证 Boss Arena 英雄不进墙（英雄在 Boss 左侧 5 格攻击）
 - [x] 验证走廊中英雄不进墙（BFS 路径通过走廊格子）
 - [x] 更新 README.md，添加游戏截图和 NPC 交互说明表格
+
+## Phase 19: 细节修复
+- [x] Guardian 改回 idle 动画（用 if(false) 屏蔽攻击动画，只有 Boss 战才攻击）
+- [x] 修复 Boss 在法阵正中心（用 (c0+c1+1)/2*TS 公式，修复半格偏差）
+- [x] Witch 的英雄目标位置改为 Witch 右侧 3 格（col=33，在可走区域 22-37 内）
+- [x] 英雄面向 Witch 时面向左（facingLeft=true，因为 Witch 在英雄左侧）
