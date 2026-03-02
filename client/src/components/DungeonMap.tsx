@@ -61,8 +61,8 @@ const ROOM_WALKABLE: Record<RoomId, { c0: number; r0: number; c1: number; r1: nu
   spawn:   { c0: 2,  r0: 2,  c1: 16, r1: 16 },
   // dungeon: walkable cols 22-34 (right wall starts ~col 35), rows 2-16
   dungeon: { c0: 22, r0: 2,  c1: 34, r1: 16 },
-  // boss: thick left divider wall (~9 tiles), walkable cols 50-67, rows 2-37
-  boss:    { c0: 50, r0: 2,  c1: 67, r1: 37 },
+  // boss: open floor, walkable cols 42-67, rows 2-37 (no divider wall in new bg)
+  boss:    { c0: 42, r0: 2,  c1: 67, r1: 37 },
   // shop: walkable cols 2-16, rows 22-37
   shop:    { c0: 2,  r0: 22, c1: 16, r1: 37 },
   // rest: walkable cols 22-37, rows 22-37
@@ -113,17 +113,16 @@ function buildWalkableGrid(): boolean[][] {
   // Add corridor connections between rooms (4-tile wide passages aligned with arch positions)
   // spawn ↔ dungeon: HORIZONTAL corridor cols 16-22, rows 8-11 (connects spawn c1=16 to dungeon c0=22)
   for (let r = 8; r <= 11; r++) for (let c = 16; c <= 22; c++) grid[r][c] = true;
-  // dungeon ↔ boss: HORIZONTAL corridor cols 34-50, rows 8-11 (spans thick divider wall)
-  for (let r = 8; r <= 11; r++) for (let c = 34; c <= 50; c++) grid[r][c] = true;
+  // dungeon ↔ boss: HORIZONTAL corridor cols 34-42, rows 8-11
+  for (let r = 8; r <= 11; r++) for (let c = 34; c <= 42; c++) grid[r][c] = true;
   // spawn ↔ shop: VERTICAL corridor cols 7-12, rows 16-22 (connects spawn r1=16 to shop r0=22)
   for (let c = 7; c <= 12; c++) for (let r = 16; r <= 22; r++) grid[r][c] = true;
   // dungeon ↔ rest: VERTICAL corridor cols 27-32, rows 16-22 (connects dungeon r1=16 to rest r0=22)
   for (let c = 27; c <= 32; c++) for (let r = 16; r <= 22; r++) grid[r][c] = true;
   // shop ↔ rest: HORIZONTAL corridor cols 16-22, rows 27-32 (connects shop c1=16 to rest c0=22)
   for (let r = 27; r <= 32; r++) for (let c = 16; c <= 22; c++) grid[r][c] = true;
-  // boss ↔ rest: HORIZONTAL corridor spanning cols 37-50, rows 35-38
-  // (connects rest c1=37 to boss c0=50 through the bottom arch of boss arena)
-  for (let r = 35; r <= 38; r++) for (let c = 37; c <= 50; c++) grid[r][c] = true;
+  // boss ↔ rest: HORIZONTAL corridor cols 37-42, rows 35-38
+  for (let r = 35; r <= 38; r++) for (let c = 37; c <= 42; c++) grid[r][c] = true;
 
   return grid;
 }
@@ -181,7 +180,7 @@ function bfsPath(
 
 // ─── Sprite paths ─────────────────────────────────────────────────────────────
 
-const CASTLE_BG_URL = "/sprites/mv/tilesets/dungeon_bg_new.png";
+const CASTLE_BG_URL = "/sprites/mv/tilesets/dungeon_bg_final.png";
 
 const MV = {
   bgDungeon:   "/sprites/mv/tilesets/bg_00_dungeon.png",
