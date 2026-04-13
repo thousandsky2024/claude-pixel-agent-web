@@ -872,6 +872,16 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
   const prevHeroIdsRef = useRef<Set<number>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Viewport state (refs avoid rAF re-render pressure)
+  const zoomRef = useRef(1);
+  const panRef = useRef({ x: 0, y: 0 });
+  const isPanningRef = useRef(false);
+  const lastMousePosRef = useRef({ x: 0, y: 0 });
+  const hasDraggedRef = useRef(false);
+
+  const MIN_ZOOM = 0.25;
+  const MAX_ZOOM = 4;
+
   // Fixed canvas size - no scaling. Canvas is always 3360x1920 (70x40 tiles at 48px each).
   // Container scrolls to view the full map. This ensures pixel-perfect positions for
   // Boss, heroes, walls, and all game elements.
@@ -887,6 +897,32 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
     canvas.style.width = `${CANVAS_W * DISPLAY_SCALE}px`;
     canvas.style.height = `${CANVAS_H * DISPLAY_SCALE}px`;
   }, []);
+
+  // Scroll-wheel zoom (passive: false required to call preventDefault)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const DISPLAY_SCALE = 0.5;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      // Mouse position in canvas internal pixels
+      const mouseX = (e.clientX - rect.left) / DISPLAY_SCALE;
+      const mouseY = (e.clientY - rect.top) / DISPLAY_SCALE;
+      const oldZoom = zoomRef.current;
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldZoom * factor));
+      // Keep the point under the cursor fixed in world space
+      const pan = panRef.current;
+      panRef.current = {
+        x: mouseX - (mouseX - pan.x) * (newZoom / oldZoom),
+        y: mouseY - (mouseY - pan.y) * (newZoom / oldZoom),
+      };
+      zoomRef.current = newZoom;
+    };
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", handleWheel);
+  }, [MIN_ZOOM, MAX_ZOOM]);
 
   const drawFrame = useCallback(() => {
     const canvas = canvasRef.current;
@@ -1062,8 +1098,14 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
     }
 
     // ── Render ────────────────────────────────────────────────────────────────
+    // Clear full canvas in screen space (no transform)
     ctx.fillStyle = "#0a0810";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Apply viewport transform: pan then zoom
+    ctx.save();
+    ctx.translate(panRef.current.x, panRef.current.y);
+    ctx.scale(zoomRef.current, zoomRef.current);
 
     drawCastle(ctx, heroes, tick);
 
@@ -1104,7 +1146,9 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
       }
     }
 
-    // Subtle scanline overlay
+    ctx.restore();
+
+    // Scanlines in screen space (after restoring transform)
     ctx.fillStyle = "rgba(0,0,0,0.015)";
     for (let scanY = 0; scanY < canvas.height; scanY += 4) {
       ctx.fillRect(0, scanY, canvas.width, 2);
@@ -1118,15 +1162,47 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [drawFrame]);
 
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    isPanningRef.current = true;
+    hasDraggedRef.current = false;
+    lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+    e.currentTarget.style.cursor = "grabbing";
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isPanningRef.current) return;
+    const DISPLAY_SCALE = 0.5;
+    const dx = (e.clientX - lastMousePosRef.current.x) / DISPLAY_SCALE;
+    const dy = (e.clientY - lastMousePosRef.current.y) / DISPLAY_SCALE;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) hasDraggedRef.current = true;
+    panRef.current = { x: panRef.current.x + dx, y: panRef.current.y + dy };
+    lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+  }, []);
+
+  const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    isPanningRef.current = false;
+    e.currentTarget.style.cursor = "grab";
+  }, []);
+
+  const handleMouseLeave = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    isPanningRef.current = false;
+    e.currentTarget.style.cursor = "grab";
+  }, []);
+
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
+      // Ignore clicks that were actually drags
+      if (hasDraggedRef.current) return;
+
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
-      // Canvas is displayed at 50% scale, so convert CSS pixels → canvas pixels
+      // CSS pixels → canvas internal pixels → world pixels (invert pan+zoom transform)
       const DISPLAY_SCALE = 0.5;
-      const mx = (e.clientX - rect.left) / DISPLAY_SCALE;
-      const my = (e.clientY - rect.top) / DISPLAY_SCALE;
+      const canvasX = (e.clientX - rect.left) / DISPLAY_SCALE;
+      const canvasY = (e.clientY - rect.top) / DISPLAY_SCALE;
+      const mx = (canvasX - panRef.current.x) / zoomRef.current;
+      const my = (canvasY - panRef.current.y) / zoomRef.current;
 
       // Debug: log canvas coordinates on click when ?debug=1
       if (new URLSearchParams(window.location.search).get('debug') === '1') {
@@ -1156,8 +1232,12 @@ export default function DungeonMap({ heroes, selectedHeroId, onHeroClick }: Prop
       <canvas
         ref={canvasRef}
         onClick={handleClick}
-        className="cursor-pointer block"
-        style={{ imageRendering: "pixelated" }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
+        className="block"
+        style={{ imageRendering: "pixelated", cursor: "grab" }}
       />
     </div>
   );
