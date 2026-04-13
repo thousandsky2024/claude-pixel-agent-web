@@ -154,6 +154,14 @@ class DungeonScene extends Phaser.Scene {
   private selectedHeroId: number | null = null;
   private onHeroClick: (id: number) => void = () => {};
 
+  // Zoom / pan state
+  private isDragging = false;
+  private lastPointerX = 0;
+  private lastPointerY = 0;
+  private hasDragged = false;
+  private readonly MIN_ZOOM = 0.25;
+  private readonly MAX_ZOOM = 4;
+
   // NPC sprites
   private bossSprite!: Phaser.GameObjects.Sprite;
   private guardianSprite!: Phaser.GameObjects.Sprite;
@@ -257,18 +265,62 @@ class DungeonScene extends Phaser.Scene {
     this.cameras.main.setZoom(0.5);
     this.cameras.main.centerOn(CANVAS_W / 2, CANVAS_H / 2);
 
-    // ── Input ───────────────────────────────────────────────────────────────
-    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      const worldX = pointer.worldX;
-      const worldY = pointer.worldY;
-      for (const [id, hs] of this.heroSprites) {
-        const dx = hs.px - worldX;
-        const dy = hs.py - worldY;
-        if (Math.sqrt(dx * dx + dy * dy) < 36) {
-          this.onHeroClick(id);
-          return;
+    // ── Input: zoom + pan ────────────────────────────────────────────────────
+    // Prevent page scroll while the cursor is over the canvas
+    this.sys.game.canvas.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
+
+    // Scroll-wheel zoom centred on the cursor position
+    this.input.on('wheel', (pointer: Phaser.Input.Pointer, _gos: unknown, _dx: number, deltaY: number) => {
+      const cam = this.cameras.main;
+      const oldZoom = cam.zoom;
+      const factor = deltaY < 0 ? 1.1 : 1 / 1.1;
+      const newZoom = Phaser.Math.Clamp(oldZoom * factor, this.MIN_ZOOM, this.MAX_ZOOM);
+      // World position under cursor before zoom change
+      const worldX = cam.scrollX + pointer.x / oldZoom;
+      const worldY = cam.scrollY + pointer.y / oldZoom;
+      cam.setZoom(newZoom);
+      // Re-anchor scroll so the same world point stays under the cursor
+      cam.scrollX = worldX - pointer.x / newZoom;
+      cam.scrollY = worldY - pointer.y / newZoom;
+    });
+
+    // Drag to pan; distinguish from a click on pointerup
+    this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
+      this.isDragging = true;
+      this.hasDragged = false;
+      this.lastPointerX = ptr.x;
+      this.lastPointerY = ptr.y;
+      this.sys.game.canvas.style.cursor = 'grabbing';
+    });
+
+    this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => {
+      if (!this.isDragging) return;
+      const dx = ptr.x - this.lastPointerX;
+      const dy = ptr.y - this.lastPointerY;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) this.hasDragged = true;
+      const cam = this.cameras.main;
+      cam.scrollX -= dx / cam.zoom;
+      cam.scrollY -= dy / cam.zoom;
+      this.lastPointerX = ptr.x;
+      this.lastPointerY = ptr.y;
+    });
+
+    this.input.on('pointerup', (ptr: Phaser.Input.Pointer) => {
+      if (!this.hasDragged) {
+        // Treat as click — check if a hero was hit
+        const worldX = ptr.worldX;
+        const worldY = ptr.worldY;
+        for (const [id, hs] of this.heroSprites) {
+          const dx = hs.px - worldX;
+          const dy = hs.py - worldY;
+          if (Math.sqrt(dx * dx + dy * dy) < 36) {
+            this.onHeroClick(id);
+            break;
+          }
         }
       }
+      this.isDragging = false;
+      this.sys.game.canvas.style.cursor = 'grab';
     });
   }
 
@@ -728,6 +780,7 @@ export default function DungeonMapPhaser({ heroes, selectedHeroId, onHeroClick }
         canvas.style.height = `${CANVAS_H * 0.5}px`;
         canvas.style.imageRendering = "pixelated";
         canvas.style.display = "block";
+        canvas.style.cursor = "grab";
       }
     }, 200);
 
@@ -756,6 +809,7 @@ export default function DungeonMapPhaser({ heroes, selectedHeroId, onHeroClick }
           canvas.style.imageRendering = "pixelated";
           canvas.style.display = "block";
           canvas.style.flexShrink = "0";
+          canvas.style.cursor = "grab";
         }
       }
     };
@@ -768,10 +822,10 @@ export default function DungeonMapPhaser({ heroes, selectedHeroId, onHeroClick }
     <div
       ref={containerRef}
       style={{
-        cursor: "pointer",
+        cursor: "grab",
         width: "100%",
         height: "100%",
-        overflow: "auto",
+        overflow: "hidden",
         backgroundColor: "#0a0810",
         display: "block",
         lineHeight: 0,
